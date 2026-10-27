@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    name: Format, lint and test
+    runs-on: ubuntu-latest
+    # Arch matches the GTK and libadwaita versions Earmuff is developed against
+    container: archlinux:latest
+    steps:
+      - name: Install build and test dependencies
+        # dbus-daemon and gtk4-broadwayd (part of gtk4) run the headless window and tray tests
+        run: pacman -Syu --noconfirm --needed base-devel git rust gtk4 libadwaita dbus ttf-dejavu
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Lint
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Unit, integration and end-to-end tests
+        run: cargo test --workspace
