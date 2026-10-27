@@ -12,6 +12,7 @@ earmuff-application.workspace = true
 earmuff-domain.workspace = true
 earmuff-protocols.workspace = true
 rustix.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
