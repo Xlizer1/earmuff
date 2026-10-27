@@ -13,5 +13,8 @@ earmuff-domain.workspace = true
 earmuff-protocols.workspace = true
 rustix.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true
