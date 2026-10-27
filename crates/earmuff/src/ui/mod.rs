@@ -8,8 +8,8 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use adw::prelude::*;
-use earmuff_application::{Backend, ManagerOptions, PreferencesStore};
-use earmuff_infrastructure::config::JsonPreferencesStore;
+use earmuff_application::{Autostart, Backend, ManagerOptions, PreferencesStore};
+use earmuff_infrastructure::config::{JsonPreferencesStore, XdgAutostart};
 use gtk::gio;
 
 pub const APP_ID: &str = "io.github.xlizer1.Earmuff";
@@ -30,7 +30,10 @@ pub struct UiOptions {
     pub tray: bool,
     /// Running with a simulated headset: uses its own app ID so it doesn't reach a real instance
     pub demo: bool,
+    /// Start in the tray without showing the window (when there is a tray)
+    pub hidden: bool,
     pub preferences: Arc<dyn PreferencesStore>,
+    pub autostart: Arc<dyn Autostart>,
 }
 
 impl Default for UiOptions {
@@ -40,7 +43,9 @@ impl Default for UiOptions {
             manager: ManagerOptions::default(),
             tray: true,
             demo: false,
+            hidden: false,
             preferences: Arc::new(JsonPreferencesStore::in_config_dir()),
+            autostart: Arc::new(XdgAutostart::for_this_program()),
         }
     }
 }

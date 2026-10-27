@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use adw::prelude::*;
-use earmuff_application::{AppEvent, Backend, DeviceManager, Preferences, PreferencesStore};
+use earmuff_application::{AppEvent, Autostart, Backend, DeviceManager, Preferences, PreferencesStore};
 use earmuff_domain::{DeviceId, Setting};
 use gtk::gio;
 use gtk::glib::{self, SourceId};
@@ -20,6 +20,7 @@ use ksni::TrayMethods;
 use super::battery_ring::BatteryRing;
 use super::view_model::{
     ACCENTS, Control, ControlView, DeviceView, Input, Model, Page, SidebarItem, Widget, accent_class, accent_index,
+    autostart_hint,
 };
 use super::{APP_ID, RESOURCE_PATH, UiOptions};
 use crate::tray::{HeadsetTray, TrayEvent, TrayState};
@@ -28,7 +29,7 @@ use crate::tray::{HeadsetTray, TrayEvent, TrayState};
 pub(super) fn open(app: &adw::Application, backends: Vec<Arc<dyn Backend>>, options: &UiOptions) {
     // the gaming look is dark, whatever the desktop's style
     adw::StyleManager::default().set_color_scheme(adw::ColorScheme::ForceDark);
-    let ui = Ui::new(app, options.preferences.clone());
+    let ui = Ui::new(app, options.preferences.clone(), options.autostart.clone());
     ui.connect_signals();
     ui.install_actions();
     ui.apply_accent();
@@ -37,7 +38,10 @@ pub(super) fn open(app: &adw::Application, backends: Vec<Arc<dyn Backend>>, opti
     }
     ui.start_manager(backends, options);
     ui.render();
-    ui.window.present();
+    // started at login: stay in the tray (the tray shows the window if it can't start)
+    if !options.hidden {
+        ui.window.present();
+    }
 }
 
 /// An app action: its name, keyboard shortcut and what it does
@@ -145,10 +149,11 @@ struct Ui {
     hold: RefCell<Option<gio::ApplicationHoldGuard>>,
     preferences: RefCell<Preferences>,
     store: Arc<dyn PreferencesStore>,
+    autostart: Arc<dyn Autostart>,
 }
 
 impl Ui {
-    fn new(app: &adw::Application, store: Arc<dyn PreferencesStore>) -> Rc<Ui> {
+    fn new(app: &adw::Application, store: Arc<dyn PreferencesStore>, autostart: Arc<dyn Autostart>) -> Rc<Ui> {
         // sidebar: every connected headset
         let device_list = gtk::ListBox::builder().name("device-list").css_classes(["navigation-sidebar"]).build();
         device_list.set_placeholder(Some(
@@ -275,6 +280,7 @@ impl Ui {
             hold: RefCell::new(None),
             preferences: RefCell::new(store.load()),
             store,
+            autostart,
         })
     }
 
@@ -318,8 +324,27 @@ impl Ui {
         });
         let appearance = adw::PreferencesGroup::builder().title("Appearance").build();
         appearance.add(&accent);
+
+        let login = adw::SwitchRow::builder()
+            .name("start-on-login")
+            .title("Start when you log in")
+            .subtitle("Earmuff starts hidden in the tray")
+            .active(self.autostart.is_enabled())
+            .build();
+        let weak = Rc::downgrade(self);
+        login.connect_active_notify(move |row| {
+            let Some(ui) = weak.upgrade() else { return };
+            if let Err(error) = ui.autostart.set_enabled(row.is_active()) {
+                ui.toasts.add_toast(adw::Toast::new(&format!("Couldn't change start-up: {error}")));
+            }
+        });
+        let startup = adw::PreferencesGroup::builder().title("Startup").build();
+        startup.set_description(autostart_hint(&std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default()));
+        startup.add(&login);
+
         let page = adw::PreferencesPage::builder().title("General").icon_name("preferences-system-symbolic").build();
         page.add(&appearance);
+        page.add(&startup);
         let dialog = adw::PreferencesDialog::builder().name("preferences").build();
         dialog.add(&page);
         dialog.present(Some(&self.window));
@@ -673,8 +698,14 @@ impl Ui {
             let handle = match HeadsetTray::new(sender, tray_pixmap()).spawn().await {
                 Ok(handle) => handle,
                 Err(error) => {
-                    // no tray on this desktop: the window's X quits the app instead
+                    // no tray on this desktop: the window's X quits the app instead, and
+                    // a window started hidden shows after all, or Earmuff would be unreachable
                     eprintln!("earmuff: no system tray ({error})");
+                    if let Some(ui) = weak.upgrade()
+                        && !ui.window.is_visible()
+                    {
+                        ui.window.present();
+                    }
                     return;
                 }
             };

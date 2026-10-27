@@ -20,7 +20,7 @@ pub fn run() -> ExitCode {
     let args = cli::Cli::parse();
     let backends = backends(args.demo);
     match args.command {
-        None => ui::run(backends, ui::UiOptions { demo: args.demo, ..Default::default() }),
+        None => ui::run(backends, ui::UiOptions { demo: args.demo, hidden: args.hidden, ..Default::default() }),
         Some(command) => cli::run(command, args.device, &backends),
     }
 }

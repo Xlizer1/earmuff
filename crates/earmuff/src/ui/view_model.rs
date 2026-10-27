@@ -20,6 +20,18 @@ pub fn accent_class(name: &str) -> Option<String> {
     (name != "red" && ACCENTS.iter().any(|(known, _)| *known == name)).then(|| format!("accent-{name}"))
 }
 
+/// What to tell users whose desktop doesn't run autostart entries
+pub fn autostart_hint(desktop: &str) -> Option<&'static str> {
+    let desktop = desktop.to_ascii_lowercase();
+    if desktop.contains("hyprland") {
+        Some("Hyprland doesn't run autostart entries: add \"exec-once = earmuff --hidden\" to hyprland.conf.")
+    } else if desktop.contains("sway") {
+        Some("Sway doesn't run autostart entries: add \"exec earmuff --hidden\" to your Sway config.")
+    } else {
+        None
+    }
+}
+
 /// Where an accent sits in the Preferences list; unknown names show as red
 pub fn accent_index(name: &str) -> u32 {
     ACCENTS.iter().position(|(known, _)| *known == name).unwrap_or(0) as u32
@@ -785,6 +797,14 @@ mod tests {
         assert_eq!((view.battery, view.battery_text.as_str()), (Some(99), "99%"));
         assert_eq!((view.charge_text.as_str(), view.subtitle.as_str()), ("Charging", "Black/Red"));
         assert_eq!(view.detail, "HyperX · Black/Red");
+    }
+
+    #[test]
+    fn autostart_hints_for_desktops_without_autostart() {
+        assert!(autostart_hint("Hyprland").unwrap().contains("exec-once = earmuff --hidden"));
+        assert!(autostart_hint("sway").unwrap().contains("exec earmuff --hidden"));
+        assert_eq!(autostart_hint("GNOME"), None);
+        assert_eq!(autostart_hint("KDE"), None);
     }
 
     #[test]

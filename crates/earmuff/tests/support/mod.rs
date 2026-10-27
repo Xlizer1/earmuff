@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use adw::prelude::*;
 use earmuff::ui::UiOptions;
 use earmuff_application::{Backend, ManagerOptions};
-use earmuff_infrastructure::config::JsonPreferencesStore;
+use earmuff_infrastructure::config::{JsonPreferencesStore, XdgAutostart};
 use gtk::glib;
 
 const CHILD: &str = "EARMUFF_E2E_CHILD";
@@ -172,7 +172,9 @@ pub fn options(tray: bool) -> UiOptions {
         manager: ManagerOptions { rescan: Duration::from_millis(50), battery_refresh: Duration::from_secs(60) },
         tray,
         demo: false,
+        hidden: false,
         preferences: Arc::new(JsonPreferencesStore::in_config_dir()),
+        autostart: Arc::new(XdgAutostart::for_this_program()),
     }
 }
 

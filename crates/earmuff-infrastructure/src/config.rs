@@ -4,7 +4,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use earmuff_application::{Preferences, PreferencesStore};
+use earmuff_application::{Autostart, Preferences, PreferencesStore};
 use serde_json::{Map, Value, json};
 
 /// $XDG_CONFIG_HOME/earmuff, or ~/.config/earmuff
@@ -64,7 +64,8 @@ impl PreferencesStore for JsonPreferencesStore {
     fn load(&self) -> Preferences {
         let saved = self.read();
         let defaults = Preferences::default();
-        Preferences { accent: saved.get("accent").and_then(Value::as_str).map_or(defaults.accent, String::from) }
+        let text = |key: &str, default: String| saved.get(key).and_then(Value::as_str).map_or(default, String::from);
+        Preferences { accent: text("accent", defaults.accent) }
     }
 
     fn save(&self, preferences: &Preferences) -> Result<(), String> {
@@ -73,6 +74,53 @@ impl PreferencesStore for JsonPreferencesStore {
         saved.extend(current.as_object().cloned().unwrap_or_default());
         let text = serde_json::to_string_pretty(&Value::Object(saved)).map_err(|e| e.to_string())?;
         write_atomically(&self.path, text.as_bytes()).map_err(|e| format!("{}: {e}", self.path.display()))
+    }
+}
+
+/// Start-on-login through an XDG autostart entry, which GNOME, KDE and most desktops run
+#[derive(Debug)]
+pub struct XdgAutostart {
+    entry: PathBuf,
+    program: PathBuf,
+}
+
+impl XdgAutostart {
+    /// $XDG_CONFIG_HOME/autostart, starting this very program
+    pub fn for_this_program() -> Self {
+        let program = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("earmuff"));
+        XdgAutostart::new(xdg_dir("XDG_CONFIG_HOME", ".config").join("autostart"), program)
+    }
+
+    pub fn new(dir: impl Into<PathBuf>, program: impl Into<PathBuf>) -> Self {
+        XdgAutostart { entry: dir.into().join("io.github.xlizer1.Earmuff.desktop"), program: program.into() }
+    }
+
+    fn entry_text(&self) -> String {
+        // quoted, as the desktop entry spec allows, in case the path has spaces
+        let program = self.program.display().to_string().replace('\\', "\\\\").replace('"', "\\\"");
+        format!(
+            "[Desktop Entry]\nType=Application\nName=Earmuff\nComment=Battery and settings for your gaming headset\n\
+             Exec=\"{program}\" --hidden\nIcon=io.github.xlizer1.Earmuff\nTerminal=false\nNoDisplay=true\n\
+             X-GNOME-Autostart-enabled=true\n"
+        )
+    }
+}
+
+impl Autostart for XdgAutostart {
+    fn is_enabled(&self) -> bool {
+        self.entry.is_file()
+    }
+
+    fn set_enabled(&self, enabled: bool) -> Result<(), String> {
+        let result = if enabled {
+            write_atomically(&self.entry, self.entry_text().as_bytes())
+        } else {
+            match fs::remove_file(&self.entry) {
+                Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+                other => other,
+            }
+        };
+        result.map_err(|e| format!("{}: {e}", self.entry.display()))
     }
 }
 
@@ -124,5 +172,20 @@ mod tests {
         let files: Vec<_> =
             fs::read_dir(dir.path().join("earmuff")).unwrap().flatten().map(|e| e.file_name()).collect();
         assert_eq!(files, ["preferences.json"]);
+    }
+
+    #[test]
+    fn autostart_writes_and_removes_its_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let autostart = XdgAutostart::new(dir.path().join("autostart"), "/home/me/My Apps/earmuff");
+        assert!(!autostart.is_enabled());
+        autostart.set_enabled(true).unwrap();
+        assert!(autostart.is_enabled());
+        let entry = fs::read_to_string(dir.path().join("autostart/io.github.xlizer1.Earmuff.desktop")).unwrap();
+        assert!(entry.starts_with("[Desktop Entry]\n"));
+        assert!(entry.contains("Exec=\"/home/me/My Apps/earmuff\" --hidden\n"), "{entry}");
+        autostart.set_enabled(false).unwrap();
+        assert!(!autostart.is_enabled());
+        autostart.set_enabled(false).unwrap(); // already off
     }
 }

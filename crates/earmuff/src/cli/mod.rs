@@ -34,6 +34,10 @@ pub struct Cli {
     /// Try Earmuff with simulated headsets instead of real ones
     #[arg(long, global = true)]
     pub demo: bool,
+
+    /// Start in the tray without showing the window (for starting at login)
+    #[arg(long)]
+    pub hidden: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -344,6 +348,12 @@ mod tests {
     fn no_command_opens_the_window() {
         let cli = parse(&[]).unwrap();
         assert!(cli.command.is_none() && !cli.demo && cli.device.is_none());
+    }
+
+    #[test]
+    fn hidden_starts_the_window_in_the_tray() {
+        let cli = parse(&["--hidden"]).unwrap();
+        assert!(cli.hidden && cli.command.is_none());
     }
 
     #[test]

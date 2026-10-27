@@ -13,6 +13,13 @@ impl Default for Preferences {
     }
 }
 
+/// Starts Earmuff when the user logs in
+pub trait Autostart: Send + Sync {
+    fn is_enabled(&self) -> bool;
+
+    fn set_enabled(&self, enabled: bool) -> Result<(), String>;
+}
+
 /// Keeps preferences between runs
 pub trait PreferencesStore: Send + Sync {
     /// The saved preferences, or the defaults when there are none (or they can't be read)

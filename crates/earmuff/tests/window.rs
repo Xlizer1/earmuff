@@ -69,6 +69,17 @@ async fn scenario(app: adw::Application, headset: DemoHeadset, other: FullHeadse
         std::env::var("XDG_CONFIG_HOME").map(|dir| format!("{dir}/earmuff/preferences.json")).unwrap_or_default();
     let saved = std::fs::read_to_string(&saved).unwrap_or_default();
     ensure(saved.contains("\"cyan\""), format!("preferences file says {saved:?}"))?;
+    // ...and starting at login writes an autostart entry that starts hidden
+    let entry = std::env::var("XDG_CONFIG_HOME")
+        .map(|dir| std::path::PathBuf::from(dir).join("autostart/io.github.xlizer1.Earmuff.desktop"))
+        .unwrap_or_default();
+    let login: adw::SwitchRow = find(&window, "start-on-login")?;
+    ensure(!login.is_active(), "start on login is off at first")?;
+    login.set_active(true);
+    until("the autostart entry", || std::fs::read_to_string(&entry).is_ok_and(|text| text.contains("--hidden")))
+        .await?;
+    login.set_active(false);
+    until("the autostart entry to go", || !entry.exists()).await?;
     find::<adw::PreferencesDialog>(&window, "preferences")?.close();
     until("the dialog to close", || find::<adw::PreferencesDialog>(&window, "preferences").is_err()).await?;
 
