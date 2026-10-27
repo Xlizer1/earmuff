@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Earmuff
+Comment=Battery and settings for the HyperX Cloud Alpha Wireless
+Exec=earmuff
+Icon=audio-headset
+Terminal=false
+Categories=AudioVideo;Audio;Settings;HardwareSettings;
+Keywords=hyperx;headset;battery;sidetone;
+StartupWMClass=io.github.xlizer1.Earmuff
