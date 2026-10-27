@@ -20,6 +20,7 @@ use std::time::{Duration, Instant};
 use adw::prelude::*;
 use earmuff::ui::UiOptions;
 use earmuff_application::{Backend, ManagerOptions};
+use earmuff_infrastructure::config::JsonPreferencesStore;
 use gtk::glib;
 
 const CHILD: &str = "EARMUFF_E2E_CHILD";
@@ -140,6 +141,8 @@ fn run_child(name: &str) -> Result<bool, String> {
         .env("GDK_BACKEND", "broadway")
         .env("BROADWAY_DISPLAY", format!(":{display}"))
         .env("XDG_RUNTIME_DIR", &runtime)
+        .env("XDG_CONFIG_HOME", dir.path().join("config"))
+        .env("XDG_STATE_HOME", dir.path().join("state"))
         .env("DBUS_SESSION_BUS_ADDRESS", &address)
         .env("GSETTINGS_BACKEND", "memory")
         .env("GTK_A11Y", "none")
@@ -169,6 +172,7 @@ pub fn options(tray: bool) -> UiOptions {
         manager: ManagerOptions { rescan: Duration::from_millis(50), battery_refresh: Duration::from_secs(60) },
         tray,
         demo: false,
+        preferences: Arc::new(JsonPreferencesStore::in_config_dir()),
     }
 }
 

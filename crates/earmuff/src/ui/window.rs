@@ -8,20 +8,26 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use adw::prelude::*;
-use earmuff_application::{AppEvent, Backend, DeviceManager};
+use earmuff_application::{AppEvent, Backend, DeviceManager, Preferences, PreferencesStore};
 use earmuff_domain::{DeviceId, Setting};
 use gtk::gio;
 use gtk::glib::{self, SourceId};
 use ksni::TrayMethods;
 
 use super::UiOptions;
-use super::view_model::{Control, ControlView, DeviceView, Input, Model, Page, Widget};
+use super::view_model::{
+    ACCENTS, Control, ControlView, DeviceView, Input, Model, Page, Widget, accent_class, accent_index,
+};
 use crate::tray::{HeadsetTray, TrayEvent, TrayState};
 
 /// Builds the window, starts looking for headsets and shows it
 pub(super) fn open(app: &adw::Application, backends: Vec<Arc<dyn Backend>>, options: &UiOptions) {
-    let ui = Ui::new(app);
+    // the gaming look is dark, whatever the desktop's style
+    adw::StyleManager::default().set_color_scheme(adw::ColorScheme::ForceDark);
+    let ui = Ui::new(app, options.preferences.clone());
     ui.connect_signals();
+    ui.install_actions();
+    ui.apply_accent();
     if options.tray {
         ui.start_tray();
     }
@@ -29,6 +35,9 @@ pub(super) fn open(app: &adw::Application, backends: Vec<Arc<dyn Backend>>, opti
     ui.render();
     ui.window.present();
 }
+
+/// An app action: its name, keyboard shortcut and what it does
+type AppAction = (&'static str, &'static str, fn(&Rc<Ui>));
 
 /// The widgets of one control
 enum Row {
@@ -76,10 +85,12 @@ struct Ui {
     tray_online: Cell<bool>,
     /// Keeps the app running while the window is hidden
     hold: RefCell<Option<gio::ApplicationHoldGuard>>,
+    preferences: RefCell<Preferences>,
+    store: Arc<dyn PreferencesStore>,
 }
 
 impl Ui {
-    fn new(app: &adw::Application) -> Rc<Ui> {
+    fn new(app: &adw::Application, store: Arc<dyn PreferencesStore>) -> Rc<Ui> {
         let title = adw::WindowTitle::new("Earmuff", "");
         title.set_widget_name("title");
         let picker = gtk::DropDown::builder()
@@ -88,8 +99,18 @@ impl Ui {
             .tooltip_text("Headset")
             .visible(false)
             .build();
+        let menu = gio::Menu::new();
+        menu.append(Some("Preferences"), Some("app.preferences"));
+        menu.append(Some("Quit"), Some("app.quit"));
+        let menu_button = gtk::MenuButton::builder()
+            .name("main-menu")
+            .icon_name("open-menu-symbolic")
+            .menu_model(&menu)
+            .tooltip_text("Menu")
+            .build();
         let header = adw::HeaderBar::builder().title_widget(&title).build();
         header.pack_start(&picker);
+        header.pack_end(&menu_button);
 
         let missing_page = adw::StatusPage::builder()
             .name("missing-page")
@@ -139,7 +160,68 @@ impl Ui {
             tray: RefCell::new(None),
             tray_online: Cell::new(false),
             hold: RefCell::new(None),
+            preferences: RefCell::new(store.load()),
+            store,
         })
+    }
+
+    // --- app actions and preferences --------------------------------------
+
+    fn install_actions(self: &Rc<Self>) {
+        let actions: [AppAction; 2] =
+            [("preferences", "<Control>comma", Ui::show_preferences), ("quit", "<Control>q", |ui| ui.quit())];
+        for (name, accel, run) in actions {
+            let action = gio::SimpleAction::new(name, None);
+            let weak = Rc::downgrade(self);
+            action.connect_activate(move |_, _| {
+                if let Some(ui) = weak.upgrade() {
+                    run(&ui);
+                }
+            });
+            self.app.add_action(&action);
+            self.app.set_accels_for_action(&format!("app.{name}"), &[accel]);
+        }
+    }
+
+    fn show_preferences(self: &Rc<Self>) {
+        let labels: Vec<&str> = ACCENTS.iter().map(|(_, label)| *label).collect();
+        let accent = adw::ComboRow::builder()
+            .name("accent")
+            .title("Accent color")
+            .model(&gtk::StringList::new(&labels))
+            .selected(accent_index(&self.preferences.borrow().accent))
+            .build();
+        let weak = Rc::downgrade(self);
+        accent.connect_selected_notify(move |row| {
+            if let (Some(ui), Some((name, _))) = (weak.upgrade(), ACCENTS.get(row.selected() as usize)) {
+                ui.update_preferences(|preferences| preferences.accent = (*name).into());
+                ui.apply_accent();
+            }
+        });
+        let appearance = adw::PreferencesGroup::builder().title("Appearance").build();
+        appearance.add(&accent);
+        let page = adw::PreferencesPage::builder().title("General").icon_name("preferences-system-symbolic").build();
+        page.add(&appearance);
+        let dialog = adw::PreferencesDialog::builder().name("preferences").build();
+        dialog.add(&page);
+        dialog.present(Some(&self.window));
+    }
+
+    /// Changes the preferences and saves them
+    fn update_preferences(&self, change: impl FnOnce(&mut Preferences)) {
+        change(&mut self.preferences.borrow_mut());
+        if let Err(error) = self.store.save(&self.preferences.borrow()) {
+            self.toasts.add_toast(adw::Toast::new(&format!("Couldn't save preferences: {error}")));
+        }
+    }
+
+    fn apply_accent(&self) {
+        for (name, _) in ACCENTS {
+            self.window.remove_css_class(&format!("accent-{name}"));
+        }
+        if let Some(class) = accent_class(&self.preferences.borrow().accent) {
+            self.window.add_css_class(&class);
+        }
     }
 
     // --- widgets -> headset ----------------------------------------------

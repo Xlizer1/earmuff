@@ -41,6 +41,26 @@ async fn scenario(app: adw::Application, headset: DemoHeadset, other: FullHeadse
     // the color is the last value the headset reports
     until("the color as the subtitle", || title.subtitle() == "Black/Red").await?;
     ensure(title.title() == "Cloud Alpha Wireless (demo)", format!("title is {}", title.title()))?;
+
+    // the gaming stylesheet parses cleanly
+    let errors = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let provider = gtk::CssProvider::new();
+    let seen = errors.clone();
+    provider.connect_parsing_error(move |_, section, error| seen.borrow_mut().push(format!("{section}: {error}")));
+    provider.load_from_resource(&format!("{}/style.css", earmuff::ui::RESOURCE_PATH));
+    ensure(errors.borrow().is_empty(), format!("stylesheet errors: {:?}", errors.borrow()))?;
+
+    // Preferences (Ctrl+,) changes the accent color, and remembers it
+    app.activate_action("preferences", None);
+    until("the preferences dialog", || find::<adw::ComboRow>(&window, "accent").is_ok()).await?;
+    find::<adw::ComboRow>(&window, "accent")?.set_selected(1);
+    until("the cyan accent", || window.has_css_class("accent-cyan")).await?;
+    let saved =
+        std::env::var("XDG_CONFIG_HOME").map(|dir| format!("{dir}/earmuff/preferences.json")).unwrap_or_default();
+    let saved = std::fs::read_to_string(&saved).unwrap_or_default();
+    ensure(saved.contains("\"cyan\""), format!("preferences file says {saved:?}"))?;
+    find::<adw::PreferencesDialog>(&window, "preferences")?.close();
+    until("the dialog to close", || find::<adw::PreferencesDialog>(&window, "preferences").is_err()).await?;
     ensure(mic.subtitle().as_deref() == Some("Attached"), "mic boom attached")?;
     ensure(!mute.is_active() && !sidetone.is_active() && voice.is_active(), "switches match the headset")?;
     ensure(!level_row.is_sensitive(), "level is greyed out while monitoring is off")?;

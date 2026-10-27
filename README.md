@@ -52,7 +52,7 @@ a setting, and watch which bytes move. That's how new headsets get supported; se
 
 ## Install
 
-You need Rust 1.88 or newer, GTK 4 and libadwaita 1.4 or newer.
+You need Rust 1.88 or newer, GTK 4.16 and libadwaita 1.5 or newer.
 
 ```
 make install        # into ~/.local; PREFIX=/usr/local for everyone

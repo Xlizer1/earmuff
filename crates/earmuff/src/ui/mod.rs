@@ -7,7 +7,8 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use adw::prelude::*;
-use earmuff_application::{Backend, ManagerOptions};
+use earmuff_application::{Backend, ManagerOptions, PreferencesStore};
+use earmuff_infrastructure::config::JsonPreferencesStore;
 use gtk::gio;
 
 pub const APP_ID: &str = "io.github.xlizer1.Earmuff";
@@ -20,7 +21,7 @@ pub fn register_resources() {
     REGISTER.call_once(|| gio::resources_register_include!("earmuff.gresource").expect("embedded resources are valid"));
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct UiOptions {
     pub app_id: String,
     pub manager: ManagerOptions,
@@ -28,11 +29,18 @@ pub struct UiOptions {
     pub tray: bool,
     /// Running with a simulated headset: uses its own app ID so it doesn't reach a real instance
     pub demo: bool,
+    pub preferences: Arc<dyn PreferencesStore>,
 }
 
 impl Default for UiOptions {
     fn default() -> Self {
-        UiOptions { app_id: APP_ID.into(), manager: ManagerOptions::default(), tray: true, demo: false }
+        UiOptions {
+            app_id: APP_ID.into(),
+            manager: ManagerOptions::default(),
+            tray: true,
+            demo: false,
+            preferences: Arc::new(JsonPreferencesStore::in_config_dir()),
+        }
     }
 }
 

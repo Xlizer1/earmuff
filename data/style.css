@@ -1,0 +1,77 @@
+/* Earmuff's gaming look: deep charcoal surfaces, bold headings and a glowing accent.
+   Loaded automatically from the app's resources; the colors are libadwaita's own
+   variables, so every widget follows them. */
+
+:root {
+  --window-bg-color: #0f1015;
+  --window-fg-color: #eceef4;
+  --view-bg-color: #13151b;
+  --view-fg-color: #eceef4;
+  --headerbar-bg-color: #0b0c10;
+  --headerbar-fg-color: #eceef4;
+  --headerbar-shade-color: rgb(0 0 0 / 60%);
+  --sidebar-bg-color: #0b0c10;
+  --sidebar-fg-color: #eceef4;
+  --card-bg-color: #181a21;
+  --card-fg-color: #eceef4;
+  --dialog-bg-color: #14161c;
+  --popover-bg-color: #1a1c23;
+  --accent-bg-color: #e3242b;
+  --accent-color: #ff5a5f;
+  --accent-fg-color: #ffffff;
+}
+
+/* the accent colors offered in Preferences (red is the default above) */
+window.accent-cyan {
+  --accent-bg-color: #0098b3;
+  --accent-color: #3fd4ec;
+}
+
+window.accent-green {
+  --accent-bg-color: #1c9a45;
+  --accent-color: #4fdd7c;
+}
+
+window.accent-purple {
+  --accent-bg-color: #7c3aed;
+  --accent-color: #b18cff;
+}
+
+window.accent-orange {
+  --accent-bg-color: #df6108;
+  --accent-color: #ff9d42;
+}
+
+/* group headings: bold and spaced, like a game menu */
+preferencesgroup label.heading {
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: var(--accent-color);
+}
+
+/* setting cards: a thin accent edge that lights up under the pointer */
+list.boxed-list {
+  border: 1px solid color-mix(in srgb, var(--accent-color) 14%, transparent);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 45%);
+  transition: border-color 200ms ease-out, box-shadow 200ms ease-out;
+}
+
+list.boxed-list:hover {
+  border-color: color-mix(in srgb, var(--accent-color) 45%, transparent);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--accent-color) 22%, transparent), 0 2px 10px rgb(0 0 0 / 45%);
+}
+
+/* headset art on the status pages glows in the accent color */
+statuspage image.icon {
+  color: var(--accent-color);
+  -gtk-icon-shadow: 0 0 18px color-mix(in srgb, var(--accent-color) 60%, transparent);
+}
+
+levelbar block.filled {
+  background-color: var(--accent-bg-color);
+}
+
+windowtitle .title {
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}

@@ -10,6 +10,20 @@ pub const LOOKING: &str = "Looking for a supported headset…";
 pub const WAITING: &str = "Waiting for the headset…";
 pub const AUTO_OFF_MINUTES: [u8; 6] = [0, 10, 20, 30, 60, 90];
 const MUTE_LED_LEVELS: [&str; 4] = ["Off", "Dim", "Medium", "Bright"];
+
+/// Accent colors offered in Preferences: the name saved in the preferences, and its label
+pub const ACCENTS: [(&str, &str); 5] =
+    [("red", "Red"), ("cyan", "Cyan"), ("green", "Green"), ("purple", "Purple"), ("orange", "Orange")];
+
+/// The window's CSS class for an accent; red is the stylesheet's default and needs none
+pub fn accent_class(name: &str) -> Option<String> {
+    (name != "red" && ACCENTS.iter().any(|(known, _)| *known == name)).then(|| format!("accent-{name}"))
+}
+
+/// Where an accent sits in the Preferences list; unknown names show as red
+pub fn accent_index(name: &str) -> u32 {
+    ACCENTS.iter().position(|(known, _)| *known == name).unwrap_or(0) as u32
+}
 const NOISE_FILTERS: [&str; 3] = ["Off", "Low", "High"];
 
 /// The headsets the device manager reported, which one the window shows, and
@@ -618,6 +632,15 @@ mod tests {
         let view = model.view().unwrap();
         assert_eq!((view.battery, view.battery_text.as_str()), (Some(99), "99%"));
         assert_eq!((view.charge_text.as_str(), view.subtitle.as_str()), ("Charging", "Black/Red"));
+    }
+
+    #[test]
+    fn accents_map_to_css_classes() {
+        assert_eq!(accent_class("red"), None);
+        assert_eq!(accent_class("cyan").as_deref(), Some("accent-cyan"));
+        assert_eq!(accent_class("chartreuse"), None);
+        assert_eq!(accent_index("purple"), 3);
+        assert_eq!(accent_index("chartreuse"), 0);
     }
 
     #[test]
