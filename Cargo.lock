@@ -353,6 +353,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "earmuff-application"
+version = "0.1.0"
+dependencies = [
+ "earmuff-domain",
+]
+
+[[package]]
 name = "earmuff-domain"
 version = "0.1.0"
 
