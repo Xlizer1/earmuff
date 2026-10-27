@@ -210,6 +210,16 @@ impl FullHeadset {
         self.happen(Event::MicMuted(!muted));
     }
 
+    /// The headset loses its settings (keeping its battery and connection), like
+    /// headsets that forget them when turned off
+    pub fn forget_settings(&self) {
+        self.update(|state| {
+            let fresh = starting_status();
+            let kept = (state.status.connected, state.status.battery, state.status.charge);
+            state.status = Status { connected: kept.0, battery: kept.1, charge: kept.2, ..fresh };
+        });
+    }
+
     pub fn set_powered(&self, on: bool) {
         self.happen(Event::Connected(on));
     }

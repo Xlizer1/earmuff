@@ -8,6 +8,7 @@ mod alerts;
 mod manager;
 mod ports;
 mod preferences;
+mod profiles;
 mod usecases;
 
 #[cfg(test)]
@@ -17,4 +18,5 @@ pub use alerts::{Alert, AlertSettings, BatteryAlerts};
 pub use manager::{AppEvent, DeviceManager, ManagerOptions};
 pub use ports::{Backend, BackendError, Session, SessionError, Waker};
 pub use preferences::{Autostart, Preferences, PreferencesStore};
+pub use profiles::{ProfileStore, Profiles, remembered};
 pub use usecases::{Found, apply_settings, discover, open_device, open_first, read_status, settle};

@@ -226,6 +226,26 @@ async fn scenario(
     other.set_chatmix(20);
     until("the ChatMix reading", || chatmix.subtitle().as_deref() == Some("20 (more game)")).await?;
 
+    // the headset forgets its settings while off; Earmuff puts them back when it's on
+    other.set_powered(false);
+    until("the headset-is-off page", || page(&window) == "off").await?;
+    other.forget_settings();
+    ensure(other.status().lights == Some(true), "the headset forgot the lights setting")?;
+    other.set_powered(true);
+    until("the remembered settings to come back", || {
+        let status = other.status();
+        status.lights == Some(false)
+            && status.noise_filter == Some(NoiseFilter::High)
+            && status.equalizer_preset == Some(1)
+    })
+    .await?;
+    let profiles =
+        std::env::var("XDG_CONFIG_HOME").map(|dir| format!("{dir}/earmuff/headsets.json")).unwrap_or_default();
+    ensure(
+        std::fs::read_to_string(profiles).is_ok_and(|text| text.contains("f00b:a00d")),
+        "settings saved per headset",
+    )?;
+
     // and back to the Cloud Alpha
     list.select_row(list.row_at_index(0).as_ref());
     until("the Cloud Alpha again", || title.title() == "Cloud Alpha Wireless (demo)").await?;

@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use adw::prelude::*;
 use earmuff_application::{
-    Alert, AppEvent, Autostart, Backend, BatteryAlerts, DeviceManager, Preferences, PreferencesStore,
+    Alert, AppEvent, Autostart, Backend, BatteryAlerts, DeviceManager, Preferences, PreferencesStore, Profiles,
 };
 use earmuff_domain::{DeviceId, Setting};
 use gtk::gio;
@@ -31,7 +31,7 @@ use crate::tray::{HeadsetTray, TrayEvent, TrayState};
 pub(super) fn open(app: &adw::Application, backends: Vec<Arc<dyn Backend>>, options: &UiOptions) {
     // the gaming look is dark, whatever the desktop's style
     adw::StyleManager::default().set_color_scheme(adw::ColorScheme::ForceDark);
-    let ui = Ui::new(app, options.preferences.clone(), options.autostart.clone());
+    let ui = Ui::new(app, options);
     ui.connect_signals();
     ui.install_actions();
     ui.apply_accent();
@@ -153,10 +153,13 @@ struct Ui {
     store: Arc<dyn PreferencesStore>,
     autostart: Arc<dyn Autostart>,
     alerts: RefCell<BatteryAlerts>,
+    profiles: RefCell<Profiles>,
 }
 
 impl Ui {
-    fn new(app: &adw::Application, store: Arc<dyn PreferencesStore>, autostart: Arc<dyn Autostart>) -> Rc<Ui> {
+    fn new(app: &adw::Application, options: &UiOptions) -> Rc<Ui> {
+        let store = options.preferences.clone();
+        let preferences = store.load();
         // sidebar: every connected headset
         let device_list = gtk::ListBox::builder().name("device-list").css_classes(["navigation-sidebar"]).build();
         device_list.set_placeholder(Some(
@@ -281,10 +284,11 @@ impl Ui {
             tray: RefCell::new(None),
             tray_online: Cell::new(false),
             hold: RefCell::new(None),
-            alerts: RefCell::new(BatteryAlerts::new(store.load().alerts())),
-            preferences: RefCell::new(store.load()),
+            alerts: RefCell::new(BatteryAlerts::new(preferences.alerts())),
+            profiles: RefCell::new(Profiles::new(options.profiles.clone(), preferences.remember_settings)),
+            preferences: RefCell::new(preferences),
             store,
-            autostart,
+            autostart: options.autostart.clone(),
         })
     }
 
@@ -375,12 +379,28 @@ impl Ui {
                 ui.update_preferences(|preferences| preferences.notify_charged = row.is_active());
             }
         });
+        let remember = adw::SwitchRow::builder()
+            .name("remember-settings")
+            .title("Remember each headset's settings")
+            .subtitle("Puts them back when a headset reconnects; some forget them when turned off")
+            .active(self.preferences.borrow().remember_settings)
+            .build();
+        let weak = Rc::downgrade(self);
+        remember.connect_active_notify(move |row| {
+            if let Some(ui) = weak.upgrade() {
+                ui.update_preferences(|preferences| preferences.remember_settings = row.is_active());
+            }
+        });
+        let headsets = adw::PreferencesGroup::builder().title("Headsets").build();
+        headsets.add(&remember);
+
         let notifications = adw::PreferencesGroup::builder().title("Notifications").build();
         notifications.add(&low);
         notifications.add(&charged);
 
         let page = adw::PreferencesPage::builder().title("General").icon_name("preferences-system-symbolic").build();
         page.add(&appearance);
+        page.add(&headsets);
         page.add(&notifications);
         page.add(&startup);
         let dialog = adw::PreferencesDialog::builder().name("preferences").build();
@@ -414,6 +434,7 @@ impl Ui {
     fn update_preferences(&self, change: impl FnOnce(&mut Preferences)) {
         change(&mut self.preferences.borrow_mut());
         self.alerts.borrow_mut().set_settings(self.preferences.borrow().alerts());
+        self.profiles.borrow_mut().set_enabled(self.preferences.borrow().remember_settings);
         if let Err(error) = self.store.save(&self.preferences.borrow()) {
             self.toasts.add_toast(adw::Toast::new(&format!("Couldn't save preferences: {error}")));
         }
@@ -518,6 +539,11 @@ impl Ui {
                 let alerts = ui.alerts.borrow_mut().on_event(&event);
                 for alert in alerts {
                     ui.notify(&alert);
+                }
+                // a headset that came back on gets its remembered settings
+                let restore = ui.profiles.borrow_mut().on_event(&event);
+                for (device, setting) in restore {
+                    ui.send_to(&device, setting);
                 }
             }
         });

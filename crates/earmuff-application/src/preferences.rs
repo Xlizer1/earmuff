@@ -9,6 +9,8 @@ pub struct Preferences {
     pub battery_alert: u8,
     /// Say when a charging headset is full
     pub notify_charged: bool,
+    /// Put each headset's settings back when it reconnects
+    pub remember_settings: bool,
 }
 
 impl Preferences {
@@ -22,7 +24,7 @@ impl Preferences {
 
 impl Default for Preferences {
     fn default() -> Self {
-        Preferences { accent: "red".into(), battery_alert: 20, notify_charged: true }
+        Preferences { accent: "red".into(), battery_alert: 20, notify_charged: true, remember_settings: true }
     }
 }
 
