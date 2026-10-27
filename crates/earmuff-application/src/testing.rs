@@ -8,7 +8,7 @@ use earmuff_domain::{BackendKind, Capability, DeviceId, DeviceInfo, Event, Query
 
 use crate::ports::{Backend, BackendError, Session, SessionError, Waker};
 
-const ALL_CAPABILITIES: [Capability; 7] = [
+const ALL_CAPABILITIES: [Capability; 8] = [
     Capability::Battery,
     Capability::MicMute,
     Capability::MicAttached,
@@ -16,6 +16,7 @@ const ALL_CAPABILITIES: [Capability; 7] = [
     Capability::SidetoneLevel,
     Capability::AutoOff,
     Capability::VoicePrompts,
+    Capability::Lights,
 ];
 
 #[derive(Default)]
@@ -75,6 +76,8 @@ pub(crate) struct FakeSession {
     info: DeviceInfo,
     answers: HashMap<Query, Vec<Event>>,
     never_idle: bool,
+    /// Refuses every setting with this message
+    reject: Option<String>,
     handle: FakeHandle,
 }
 
@@ -91,6 +94,7 @@ impl FakeSession {
             info: info.clone(),
             answers: HashMap::new(),
             never_idle: false,
+            reject: None,
             handle: FakeHandle(Arc::new(Shared {
                 info: Mutex::new(info),
                 state: Mutex::default(),
@@ -128,6 +132,11 @@ impl FakeSession {
         self
     }
 
+    pub fn rejecting(mut self, reason: &str) -> Self {
+        self.reject = Some(reason.into());
+        self
+    }
+
     pub fn handle(&self) -> FakeHandle {
         self.handle.clone()
     }
@@ -156,8 +165,9 @@ impl Session for FakeSession {
     }
 
     fn apply(&mut self, setting: Setting) -> Result<(), SessionError> {
-        if !self.info.supports(setting.capability()) {
-            return Err(SessionError::Unsupported(setting.capability()));
+        self.info.check(&setting)?;
+        if let Some(reason) = &self.reject {
+            return Err(SessionError::Rejected(reason.clone()));
         }
         self.handle.update(|s| {
             s.outbox.extend(setting.confirmation());

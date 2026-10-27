@@ -19,6 +19,8 @@ pub enum AppEvent {
     Changed(DeviceId, Event),
     /// A headset went away: unplugged, or it stopped answering
     Removed(DeviceId),
+    /// A headset didn't take a setting; the message says why
+    Failed(DeviceId, String),
     /// Why a headset that is there can't be used (e.g. no permission); `None` once resolved
     Problem(Option<String>),
 }
@@ -231,7 +233,9 @@ fn run_session(
         loop {
             match commands.try_recv() {
                 Ok(Command::Apply(setting)) => match session.apply(setting) {
-                    Err(SessionError::Unsupported(_)) => {} // the UI only offers supported settings
+                    Err(error @ (SessionError::Unsupported(_) | SessionError::Rejected(_))) => {
+                        (shared.sink)(AppEvent::Failed(id.clone(), error.to_string()));
+                    }
                     result => result?,
                 },
                 Ok(Command::Query(query)) => session.query(query)?,
@@ -329,7 +333,7 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_settings_are_ignored_without_dropping_the_headset() {
+    fn unsupported_settings_are_reported_without_dropping_the_headset() {
         let session = FakeSession::new("a").with_capabilities(&[Capability::MicMute]);
         let handle = session.handle();
         let (manager, rx) = start(vec![Arc::new(FakeBackend::new(vec![session]))], fast());
@@ -337,6 +341,20 @@ mod tests {
         expect(&rx, |e| matches!(e, AppEvent::Added(_)));
         manager.apply(&id, Setting::Sidetone(true));
         manager.apply(&id, Setting::MicMuted(true));
+        expect(&rx, |e| *e == AppEvent::Failed(id.clone(), "this headset has no sidetone setting".into()));
+        expect(&rx, |e| *e == AppEvent::Changed(id.clone(), Event::MicMuted(true)));
+    }
+
+    #[test]
+    fn rejected_settings_are_reported_and_the_headset_stays() {
+        let session = FakeSession::new("a").rejecting("the headset is asleep");
+        let handle = session.handle();
+        let (manager, rx) = start(vec![Arc::new(FakeBackend::new(vec![session]))], fast());
+        let id = handle.info().id;
+        expect(&rx, |e| matches!(e, AppEvent::Added(_)));
+        manager.apply(&id, Setting::Lights(true));
+        expect(&rx, |e| *e == AppEvent::Failed(id.clone(), "the headset is asleep".into()));
+        handle.emit(Event::MicMuted(true));
         expect(&rx, |e| *e == AppEvent::Changed(id.clone(), Event::MicMuted(true)));
     }
 

@@ -4,7 +4,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use earmuff_domain::{BackendKind, Capability, DeviceInfo, Event, Query, Setting};
+use earmuff_domain::{BackendKind, Capability, DeviceInfo, Event, Query, Setting, SettingError, UsbId};
 
 /// Finds headsets of one kind and opens them
 pub trait Backend: Send + Sync {
@@ -20,6 +20,8 @@ pub trait Backend: Send + Sync {
 pub enum BackendError {
     /// No supported headset is plugged in
     NotFound,
+    /// The headset asked for isn't plugged in
+    NotConnected(UsbId),
     /// A headset is there, but this user may not open it
     PermissionDenied {
         path: String,
@@ -32,6 +34,7 @@ impl fmt::Display for BackendError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             BackendError::NotFound => f.write_str("no supported headset found"),
+            BackendError::NotConnected(usb) => write!(f, "headset {usb} isn't plugged in"),
             BackendError::PermissionDenied { path, hint } => write!(f, "no permission to open {path} ({hint})"),
             BackendError::Failed(message) => f.write_str(message),
         }
@@ -73,13 +76,25 @@ pub enum SessionError {
     /// The headset or its dongle went away
     Disconnected(String),
     Unsupported(Capability),
+    /// The headset, or its backend, refused this one setting; the session carries on
+    Rejected(String),
+}
+
+impl From<SettingError> for SessionError {
+    fn from(error: SettingError) -> Self {
+        match error {
+            SettingError::Unsupported(capability) => SessionError::Unsupported(capability),
+            SettingError::Invalid(reason) => SessionError::Rejected(reason),
+        }
+    }
 }
 
 impl fmt::Display for SessionError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             SessionError::Disconnected(reason) => write!(f, "headset disconnected: {reason}"),
-            SessionError::Unsupported(capability) => write!(f, "this headset doesn't support {capability:?}"),
+            SessionError::Unsupported(capability) => SettingError::Unsupported(*capability).fmt(f),
+            SessionError::Rejected(reason) => f.write_str(reason),
         }
     }
 }
@@ -129,9 +144,14 @@ mod tests {
             BackendError::PermissionDenied { path: "/dev/hidraw3".into(), hint: "install the udev rule".into() };
         assert_eq!(denied.to_string(), "no permission to open /dev/hidraw3 (install the udev rule)");
         assert_eq!(SessionError::Disconnected("unplugged".into()).to_string(), "headset disconnected: unplugged");
+        assert_eq!(SessionError::Unsupported(Capability::Sidetone).to_string(), "this headset has no sidetone setting");
         assert_eq!(
-            SessionError::Unsupported(Capability::Sidetone).to_string(),
-            "this headset doesn't support Sidetone"
+            SessionError::from(SettingError::Invalid("too loud".into())),
+            SessionError::Rejected("too loud".into())
+        );
+        assert_eq!(
+            BackendError::NotConnected(UsbId::new(0x03F0, 0x098D)).to_string(),
+            "headset 03f0:098d isn't plugged in"
         );
     }
 }

@@ -3,32 +3,62 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use earmuff_domain::{Query, Setting, Status};
+use earmuff_domain::{DeviceInfo, Query, Setting, Status, UsbId};
 
 use crate::ports::{Backend, BackendError, Session, SessionError};
 
-/// Opens the first headset any backend finds, in the backends' order.
+/// Headsets the backends found, and the backend that reaches each one
+pub type Found = Vec<(Arc<dyn Backend>, DeviceInfo)>;
+
+/// Every headset the backends reach, in the backends' priority order. A headset
+/// (USB ID) that two backends reach is listed once, for the earlier backend.
+/// Also returns the first problem a backend ran into, if any.
+pub fn discover(backends: &[Arc<dyn Backend>]) -> (Found, Option<BackendError>) {
+    let mut found: Found = Vec::new();
+    let mut problem = None;
+    for backend in backends {
+        match backend.discover() {
+            Ok(devices) => {
+                let known: Vec<UsbId> = found.iter().map(|(_, info)| info.id.usb).collect();
+                found.extend(
+                    devices
+                        .into_iter()
+                        .filter(|info| !known.contains(&info.id.usb))
+                        .map(|info| (backend.clone(), info)),
+                );
+            }
+            Err(BackendError::NotFound) => {}
+            Err(error) => problem = problem.or(Some(error)),
+        }
+    }
+    (found, problem)
+}
+
+/// Opens the headset with USB ID `wanted`, or the first one found.
 ///
 /// When nothing opens, the error explains the most useful problem: a headset that
 /// is there but can't be opened beats "nothing found".
-pub fn open_first(backends: &[Arc<dyn Backend>]) -> Result<Box<dyn Session>, BackendError> {
-    let mut problem = BackendError::NotFound;
-    for backend in backends {
-        let devices = match backend.discover() {
-            Ok(devices) => devices,
-            Err(error) => {
-                problem = error;
-                continue;
-            }
-        };
-        for device in devices {
-            match backend.open(&device) {
-                Ok(session) => return Ok(session),
-                Err(error) => problem = error,
-            }
+pub fn open_device(backends: &[Arc<dyn Backend>], wanted: Option<UsbId>) -> Result<Box<dyn Session>, BackendError> {
+    let (found, problem) = discover(backends);
+    let mut problem = problem.unwrap_or(match wanted {
+        Some(usb) => BackendError::NotConnected(usb),
+        None => BackendError::NotFound,
+    });
+    for (backend, device) in found {
+        if wanted.is_some_and(|usb| usb != device.id.usb) {
+            continue;
+        }
+        match backend.open(&device) {
+            Ok(session) => return Ok(session),
+            Err(error) => problem = error,
         }
     }
     Err(problem)
+}
+
+/// Opens the first headset any backend finds, in the backends' order
+pub fn open_first(backends: &[Arc<dyn Backend>]) -> Result<Box<dyn Session>, BackendError> {
+    open_device(backends, None)
 }
 
 /// Polls until every queued command is answered, or `timeout` passes,
@@ -60,14 +90,14 @@ pub fn read_status(session: &mut dyn Session, timeout: Duration) -> Result<Statu
 }
 
 /// Applies settings in order and waits until the headset has confirmed them all.
-/// Fails before sending anything if the headset doesn't support one of them.
+/// Fails before sending anything if the headset can't take one of them.
 pub fn apply_settings(
     session: &mut dyn Session,
     settings: &[Setting],
     timeout: Duration,
 ) -> Result<Status, SessionError> {
-    if let Some(unsupported) = settings.iter().find(|s| !session.info().supports(s.capability())) {
-        return Err(SessionError::Unsupported(unsupported.capability()));
+    for setting in settings {
+        session.info().check(setting)?;
     }
     for setting in settings {
         session.apply(setting.clone())?;
@@ -81,7 +111,7 @@ pub fn apply_settings(
 mod tests {
     use super::*;
     use crate::testing::{FakeBackend, FakeSession};
-    use earmuff_domain::{Capability, Event, Percent};
+    use earmuff_domain::{BackendKind, Capability, Event, Percent};
 
     const TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -145,5 +175,44 @@ mod tests {
             Arc::new(FakeBackend::new(vec![FakeSession::new("x")]).failing_open(denied.clone()));
         assert_eq!(open_first(&[backend]).err(), Some(denied));
         assert_eq!(open_first(&[]).err(), Some(BackendError::NotFound));
+    }
+
+    #[test]
+    fn discover_lists_each_headset_once_for_the_earlier_backend() {
+        let usb = UsbId::new(0x03F0, 0x098D);
+        let native: Arc<dyn Backend> = Arc::new(FakeBackend::new(vec![
+            FakeSession::new("native").with_usb(usb).with_backend(BackendKind::Native),
+        ]));
+        let other: Arc<dyn Backend> = Arc::new(FakeBackend::new(vec![
+            FakeSession::new("hc").with_usb(usb).with_backend(BackendKind::HeadsetControl),
+            FakeSession::new("other").with_usb(UsbId::new(0x1038, 0x12AD)).with_backend(BackendKind::HeadsetControl),
+        ]));
+        let (found, problem) = discover(&[native, other]);
+        let instances: Vec<&str> = found.iter().map(|(_, info)| info.id.instance.as_str()).collect();
+        assert_eq!(instances, ["native", "other"]);
+        assert_eq!(problem, None);
+    }
+
+    #[test]
+    fn open_device_picks_the_headset_asked_for() {
+        let backend: Arc<dyn Backend> = Arc::new(FakeBackend::new(vec![
+            FakeSession::new("first").with_usb(UsbId::new(1, 1)),
+            FakeSession::new("second").with_usb(UsbId::new(2, 2)),
+        ]));
+        let backends = [backend];
+        assert_eq!(open_device(&backends, Some(UsbId::new(2, 2))).unwrap().info().id.instance, "second");
+        assert_eq!(open_device(&backends, None).unwrap().info().id.instance, "first");
+        assert_eq!(
+            open_device(&backends, Some(UsbId::new(3, 3))).err(),
+            Some(BackendError::NotConnected(UsbId::new(3, 3)))
+        );
+    }
+
+    #[test]
+    fn apply_settings_refuses_invalid_values_before_sending() {
+        let mut session = FakeSession::new("a").with_capabilities(&[Capability::MicMuteLedBrightness]);
+        let result = apply_settings(&mut session, &[Setting::MicMuteLedBrightness(9)], TIMEOUT);
+        assert_eq!(result, Err(SessionError::Rejected("mute LED brightness goes from 0 to 3, not 9".into())));
+        assert!(session.applied().is_empty());
     }
 }

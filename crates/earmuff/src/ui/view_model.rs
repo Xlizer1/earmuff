@@ -61,6 +61,8 @@ impl Model {
                 self.devices.retain(|(info, _)| info.id != *id);
                 self.devices.len() != before
             }
+            // shown as a toast by the window, nothing to redraw
+            AppEvent::Failed(..) => false,
             AppEvent::Problem(problem) => {
                 let changed = self.problem != *problem;
                 self.problem = problem.clone();

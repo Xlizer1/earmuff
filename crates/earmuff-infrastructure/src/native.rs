@@ -148,10 +148,8 @@ impl<T: Transport> Session for NativeSession<T> {
     }
 
     fn apply(&mut self, setting: Setting) -> Result<(), SessionError> {
+        self.info.check(&setting)?;
         let unsupported = SessionError::Unsupported(setting.capability());
-        if !self.info.supports(setting.capability()) {
-            return Err(unsupported);
-        }
         self.queue.extend(self.codec.apply(setting).ok_or(unsupported)?);
         self.pump()
     }
