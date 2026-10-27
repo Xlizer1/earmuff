@@ -142,6 +142,17 @@ async fn scenario(app: adw::Application, headset: DemoHeadset, watcher: Watcher,
         .map_err(|e| format!("menu path: {e}"))?;
     let menu_path = menu_path.as_str().to_string();
 
+    // the icon has a name for the icon theme and pixels for trays that can't find it
+    let name: String =
+        property(&bus, &service, "/StatusNotifierItem", "IconName").await?.try_into().map_err(|e| format!("{e}"))?;
+    support::ensure(name == "io.github.xlizer1.Earmuff", format!("icon name {name}"))?;
+    let pixmaps: Vec<(i32, i32, Vec<u8>)> =
+        property(&bus, &service, "/StatusNotifierItem", "IconPixmap").await?.try_into().map_err(|e| format!("{e}"))?;
+    let (width, height, pixels) = pixmaps.first().ok_or("no icon pixmap")?;
+    support::ensure((*width, *height, pixels.len()) == (64, 64, 64 * 64 * 4), "a 64x64 ARGB icon")?;
+    // the icon's corners are transparent, its middle is not
+    support::ensure(pixels[0] == 0 && pixels[(32 * 64 + 32) * 4] == 255, "icon alpha looks right")?;
+
     // the tooltip shows the battery
     for _ in 0..500 {
         if tooltip(&bus, &service).await? == "Battery 80%" {

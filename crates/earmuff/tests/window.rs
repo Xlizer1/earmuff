@@ -71,6 +71,15 @@ async fn scenario(app: adw::Application, headset: DemoHeadset, other: FullHeadse
     ensure(saved.contains("\"cyan\""), format!("preferences file says {saved:?}"))?;
     find::<adw::PreferencesDialog>(&window, "preferences")?.close();
     until("the dialog to close", || find::<adw::PreferencesDialog>(&window, "preferences").is_err()).await?;
+
+    // About (F1) names the app and its license
+    app.activate_action("about", None);
+    until("the about dialog", || find::<adw::AboutDialog>(&window, "about").is_ok()).await?;
+    let about: adw::AboutDialog = find(&window, "about")?;
+    ensure(about.application_name() == "Earmuff", "about names the app")?;
+    ensure(about.license_type() == gtk::License::Gpl30, "about says GPL-3.0-or-later")?;
+    about.close();
+    until("the about dialog to close", || find::<adw::AboutDialog>(&window, "about").is_err()).await?;
     ensure(mic.subtitle().as_deref() == Some("Attached"), "mic boom attached")?;
     ensure(!mute.is_active() && !sidetone.is_active() && voice.is_active(), "switches match the headset")?;
     ensure(!level_row.is_sensitive(), "level is greyed out while monitoring is off")?;

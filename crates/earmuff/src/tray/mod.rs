@@ -59,11 +59,13 @@ impl Default for TrayState {
 pub struct HeadsetTray {
     pub state: TrayState,
     events: async_channel::Sender<TrayEvent>,
+    /// The icon as pixels, for trays that can't find it in the icon theme
+    pixmap: Vec<ksni::Icon>,
 }
 
 impl HeadsetTray {
-    pub fn new(events: async_channel::Sender<TrayEvent>) -> Self {
-        HeadsetTray { state: TrayState::default(), events }
+    pub fn new(events: async_channel::Sender<TrayEvent>, pixmap: Vec<ksni::Icon>) -> Self {
+        HeadsetTray { state: TrayState::default(), events, pixmap }
     }
 
     fn send(&self, event: TrayEvent) {
@@ -82,7 +84,11 @@ impl Tray for HeadsetTray {
     }
 
     fn icon_name(&self) -> String {
-        "audio-headset".into()
+        crate::ui::APP_ID.into()
+    }
+
+    fn icon_pixmap(&self) -> Vec<ksni::Icon> {
+        self.pixmap.clone()
     }
 
     fn tool_tip(&self) -> ToolTip {
@@ -190,7 +196,7 @@ mod tests {
     #[test]
     fn menu_mutes_and_quits() {
         let (sender, receiver) = async_channel::unbounded();
-        let mut tray = HeadsetTray::new(sender);
+        let mut tray = HeadsetTray::new(sender, Vec::new());
         tray.state = TrayState::from_model(&model_with(&[Event::Connected(true), Event::MicMuted(false)]));
         let menu = tray.menu();
         let MenuItem::Checkmark(mute) = &menu[2] else { panic!("third item is the mute toggle") };

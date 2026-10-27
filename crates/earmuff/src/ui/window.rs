@@ -17,11 +17,11 @@ use gtk::gio;
 use gtk::glib::{self, SourceId};
 use ksni::TrayMethods;
 
-use super::UiOptions;
 use super::battery_ring::BatteryRing;
 use super::view_model::{
     ACCENTS, Control, ControlView, DeviceView, Input, Model, Page, SidebarItem, Widget, accent_class, accent_index,
 };
+use super::{APP_ID, RESOURCE_PATH, UiOptions};
 use crate::tray::{HeadsetTray, TrayEvent, TrayState};
 
 /// Builds the window, starts looking for headsets and shows it
@@ -169,6 +169,7 @@ impl Ui {
         title.set_widget_name("title");
         let menu = gio::Menu::new();
         menu.append(Some("Preferences"), Some("app.preferences"));
+        menu.append(Some("About Earmuff"), Some("app.about"));
         menu.append(Some("Quit"), Some("app.quit"));
         let menu_button = gtk::MenuButton::builder()
             .name("main-menu")
@@ -280,8 +281,13 @@ impl Ui {
     // --- app actions and preferences --------------------------------------
 
     fn install_actions(self: &Rc<Self>) {
-        let actions: [AppAction; 2] =
-            [("preferences", "<Control>comma", Ui::show_preferences), ("quit", "<Control>q", |ui| ui.quit())];
+        let actions: [AppAction; 4] = [
+            ("preferences", "<Control>comma", Ui::show_preferences),
+            ("about", "F1", Ui::show_about),
+            // closing hides the window when there's a tray icon
+            ("close", "<Control>w", |ui| ui.window.close()),
+            ("quit", "<Control>q", |ui| ui.quit()),
+        ];
         for (name, accel, run) in actions {
             let action = gio::SimpleAction::new(name, None);
             let weak = Rc::downgrade(self);
@@ -317,6 +323,28 @@ impl Ui {
         let dialog = adw::PreferencesDialog::builder().name("preferences").build();
         dialog.add(&page);
         dialog.present(Some(&self.window));
+    }
+
+    fn show_about(self: &Rc<Self>) {
+        let about = adw::AboutDialog::builder()
+            .name("about")
+            .application_name("Earmuff")
+            .application_icon(APP_ID)
+            .developer_name("Xlizer1")
+            .version(env!("CARGO_PKG_VERSION"))
+            .comments("Battery and settings for your gaming headset, in place of vendor apps like HyperX NGENUITY.")
+            .website("https://github.com/Xlizer1/earmuff")
+            .issue_url("https://github.com/Xlizer1/earmuff/issues")
+            .license_type(gtk::License::Gpl30)
+            .build();
+        about.add_acknowledgement_section(
+            Some("Headset protocols from"),
+            &[
+                "HeadsetControl https://github.com/Sapd/HeadsetControl",
+                "HyperHeadset https://github.com/LennardKittner/HyperHeadset",
+            ],
+        );
+        about.present(Some(&self.window));
     }
 
     /// Changes the preferences and saves them
@@ -642,7 +670,7 @@ impl Ui {
         let (sender, receiver) = async_channel::unbounded();
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
-            let handle = match HeadsetTray::new(sender).spawn().await {
+            let handle = match HeadsetTray::new(sender, tray_pixmap()).spawn().await {
                 Ok(handle) => handle,
                 Err(error) => {
                     // no tray on this desktop: the window's X quits the app instead
@@ -694,4 +722,21 @@ impl Ui {
         self.hold.take();
         self.app.quit();
     }
+}
+
+/// The tray icon as pixels: ARGB32 in network byte order, as StatusNotifierItem wants
+fn tray_pixmap() -> Vec<ksni::Icon> {
+    let texture = gtk::gdk::Texture::from_resource(&format!("{RESOURCE_PATH}/icons/tray/earmuff-64.png"));
+    let mut downloader = gtk::gdk::TextureDownloader::new(&texture);
+    downloader.set_format(gtk::gdk::MemoryFormat::A8r8g8b8);
+    let (bytes, stride) = downloader.download_bytes();
+    let (width, height) = (texture.width(), texture.height());
+    let row = usize::try_from(width).unwrap_or(0) * 4;
+    let data = bytes
+        .chunks(stride)
+        .take(usize::try_from(height).unwrap_or(0))
+        .flat_map(|line| &line[..row])
+        .copied()
+        .collect();
+    vec![ksni::Icon { width, height, data }]
 }

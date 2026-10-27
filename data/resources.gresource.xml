@@ -2,6 +2,7 @@
 <gresources>
   <gresource prefix="/io/github/xlizer1/Earmuff">
     <file compressed="true">style.css</file>
+    <file>icons/tray/earmuff-64.png</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/earmuff-headset-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/apps/io.github.xlizer1.Earmuff.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/apps/io.github.xlizer1.Earmuff-symbolic.svg</file>
