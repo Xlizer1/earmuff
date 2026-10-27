@@ -248,9 +248,14 @@ impl DeviceView {
         self.sections.iter().flat_map(|section| &section.controls).find(|c| c.control == control)
     }
 
-    /// The tabs this headset needs, in order
+    /// The tabs this headset needs, in order. Power also holds the battery history.
     pub fn tabs(&self) -> Vec<Tab> {
-        Tab::ALL.into_iter().filter(|tab| self.sections.iter().any(|section| section.tab == *tab)).collect()
+        Tab::ALL
+            .into_iter()
+            .filter(|tab| {
+                self.sections.iter().any(|section| section.tab == *tab) || (*tab == Tab::Power && self.has_battery)
+            })
+            .collect()
     }
 }
 

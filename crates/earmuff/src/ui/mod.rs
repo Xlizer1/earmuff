@@ -1,5 +1,6 @@
 //! The GTK4/libadwaita window and the tray icon.
 
+mod battery_graph;
 mod battery_ring;
 pub mod view_model;
 mod window;
@@ -8,8 +9,8 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use adw::prelude::*;
-use earmuff_application::{Autostart, Backend, ManagerOptions, PreferencesStore, ProfileStore};
-use earmuff_infrastructure::config::{JsonPreferencesStore, JsonProfileStore, XdgAutostart};
+use earmuff_application::{Autostart, Backend, HistoryStore, ManagerOptions, PreferencesStore, ProfileStore};
+use earmuff_infrastructure::config::{CsvHistoryStore, JsonPreferencesStore, JsonProfileStore, XdgAutostart};
 use gtk::gio;
 
 pub const APP_ID: &str = "io.github.xlizer1.Earmuff";
@@ -35,6 +36,7 @@ pub struct UiOptions {
     pub preferences: Arc<dyn PreferencesStore>,
     pub autostart: Arc<dyn Autostart>,
     pub profiles: Arc<dyn ProfileStore>,
+    pub history: Arc<dyn HistoryStore>,
 }
 
 impl Default for UiOptions {
@@ -48,6 +50,7 @@ impl Default for UiOptions {
             preferences: Arc::new(JsonPreferencesStore::in_config_dir()),
             autostart: Arc::new(XdgAutostart::for_this_program()),
             profiles: Arc::new(JsonProfileStore::in_config_dir()),
+            history: Arc::new(CsvHistoryStore::in_state_dir()),
         }
     }
 }

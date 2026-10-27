@@ -5,6 +5,7 @@
 //! presentation layer drives the use cases and the [`DeviceManager`].
 
 mod alerts;
+mod history;
 mod manager;
 mod ports;
 mod preferences;
@@ -15,6 +16,7 @@ mod usecases;
 mod testing;
 
 pub use alerts::{Alert, AlertSettings, BatteryAlerts};
+pub use history::{BatteryHistory, HistoryStore, KEEP_FOR, SAMPLE_EVERY, Sample, minutes_left, time_left_text};
 pub use manager::{AppEvent, DeviceManager, ManagerOptions};
 pub use ports::{Backend, BackendError, Session, SessionError, Waker};
 pub use preferences::{Autostart, Preferences, PreferencesStore};

@@ -76,12 +76,26 @@ fn main() -> ExitCode {
                 .await
         })
         .map_err(|e| format!("fake notification server: {e}"))?;
+        seed_battery_history()?;
         let demo = DemoBackend::new();
         let headset = demo.headsets()[0].clone();
         let other = demo.full_headset().clone();
         let backends: Vec<Arc<dyn Backend>> = vec![Arc::new(demo)];
         run_app(backends, false, move |app| scenario(app, headset, other, notifications))
     })
+}
+
+/// Three hours of a draining Cloud Alpha Wireless, so the window can estimate the time left
+fn seed_battery_history() -> Outcome {
+    let state = std::env::var("XDG_STATE_HOME").map_err(|e| e.to_string())?;
+    let dir = std::path::Path::new(&state).join("earmuff");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e| e.to_string())?.as_secs();
+    let readings: String = [(3 * 3600, 100), (2 * 3600, 95), (3600, 90), (600, 82)]
+        .iter()
+        .map(|(ago, level)| format!("{},{level},0\n", now - ago))
+        .collect();
+    std::fs::write(dir.join("battery-03f0-098d.csv"), readings).map_err(|e| e.to_string())
 }
 
 async fn scenario(
@@ -114,6 +128,14 @@ async fn scenario(
     let badge: gtk::Label = find(&window, "badge")?;
     ensure(hero_name.label() == "CLOUD ALPHA WIRELESS (DEMO)", format!("banner says {}", hero_name.label()))?;
     ensure(badge.label() == "CONNECTED", format!("badge says {}", badge.label()))?;
+
+    // the battery history gives a time-left estimate and a graph on the Power tab
+    let time_left: gtk::Label = find(&window, "time-left")?;
+    until("the time left", || time_left.is_visible() && time_left.label().starts_with("About ")).await?;
+    ensure(time_left.label().ends_with("left"), format!("time left says {}", time_left.label()))?;
+    ensure(find::<gtk::DrawingArea>(&window, "battery-graph").is_ok(), "a battery graph")?;
+    find::<gtk::ToggleButton>(&window, "history-week")?.set_active(true);
+    find::<gtk::ToggleButton>(&window, "history-day")?.set_active(true);
     headset.with(|sim, now| sim.set_charging(1, now));
     until("the charging badge", || badge.label() == "CHARGING" && badge.has_css_class("charging")).await?;
     headset.with(|sim, now| sim.set_charging(0, now));

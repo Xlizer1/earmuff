@@ -12,17 +12,19 @@ use std::time::Duration;
 
 use adw::prelude::*;
 use earmuff_application::{
-    Alert, AppEvent, Autostart, Backend, BatteryAlerts, DeviceManager, Preferences, PreferencesStore, Profiles,
+    Alert, AppEvent, Autostart, Backend, BatteryAlerts, BatteryHistory, DeviceManager, Preferences, PreferencesStore,
+    Profiles, time_left_text,
 };
 use earmuff_domain::{DeviceId, Setting};
 use gtk::gio;
 use gtk::glib::{self, SourceId};
 use ksni::TrayMethods;
 
+use super::battery_graph::{BatteryGraph, DAY, WEEK};
 use super::battery_ring::BatteryRing;
 use super::view_model::{
-    ACCENTS, BATTERY_ALERTS, Control, ControlView, DeviceView, Input, Model, Page, SidebarItem, Widget, accent_class,
-    accent_index, alert_text, autostart_hint, battery_alert_index, battery_alert_label,
+    ACCENTS, BATTERY_ALERTS, Control, ControlView, DeviceView, Input, Model, Page, SidebarItem, Tab, Widget,
+    accent_class, accent_index, alert_text, autostart_hint, battery_alert_index, battery_alert_label,
 };
 use super::{APP_ID, RESOURCE_PATH, UiOptions};
 use crate::tray::{HeadsetTray, TrayEvent, TrayState};
@@ -62,8 +64,15 @@ enum Row {
 struct Rows {
     device: Option<DeviceId>,
     controls: Vec<Control>,
+    has_battery: bool,
     pages: Vec<gtk::Widget>,
     rows: HashMap<Control, Row>,
+    graph: Option<BatteryGraph>,
+}
+
+/// The time in Unix seconds
+fn now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.as_secs())
 }
 
 /// One headset's entry in the sidebar
@@ -78,6 +87,7 @@ struct Hero {
     name: gtk::Label,
     detail: gtk::Label,
     badge: gtk::Label,
+    time_left: gtk::Label,
     ring: BatteryRing,
 }
 
@@ -92,6 +102,8 @@ impl Hero {
         let name = gtk::Label::builder().name("hero-name").css_classes(["hero-name"]).xalign(0.0).wrap(true).build();
         let detail = gtk::Label::builder().name("hero-detail").css_classes(["dim-label"]).xalign(0.0).build();
         let badge = gtk::Label::builder().name("badge").css_classes(["badge"]).halign(gtk::Align::Start).build();
+        let time_left =
+            gtk::Label::builder().name("time-left").css_classes(["dim-label", "caption"]).xalign(0.0).build();
         let text = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .spacing(6)
@@ -101,15 +113,18 @@ impl Hero {
         text.append(&name);
         text.append(&detail);
         text.append(&badge);
+        text.append(&time_left);
         let ring = BatteryRing::new();
         let widget = gtk::Box::builder().name("hero").spacing(28).css_classes(["hero"]).build();
         widget.append(&art);
         widget.append(&text);
         widget.append(&ring.widget);
-        Hero { widget, name, detail, badge, ring }
+        Hero { widget, name, detail, badge, time_left, ring }
     }
 
-    fn show(&self, view: &DeviceView) {
+    fn show(&self, view: &DeviceView, time_left: Option<String>) {
+        self.time_left.set_visible(time_left.is_some());
+        self.time_left.set_label(&time_left.unwrap_or_default());
         self.name.set_label(&view.title.to_uppercase());
         self.detail.set_label(&view.detail);
         self.badge.set_label(view.badge);
@@ -154,6 +169,9 @@ struct Ui {
     autostart: Arc<dyn Autostart>,
     alerts: RefCell<BatteryAlerts>,
     profiles: RefCell<Profiles>,
+    history: RefCell<BatteryHistory>,
+    /// How far back the battery graph goes
+    history_span: Cell<u64>,
 }
 
 impl Ui {
@@ -286,6 +304,8 @@ impl Ui {
             hold: RefCell::new(None),
             alerts: RefCell::new(BatteryAlerts::new(preferences.alerts())),
             profiles: RefCell::new(Profiles::new(options.profiles.clone(), preferences.remember_settings)),
+            history: RefCell::new(BatteryHistory::new(options.history.clone())),
+            history_span: Cell::new(DAY),
             preferences: RefCell::new(preferences),
             store,
             autostart: options.autostart.clone(),
@@ -527,7 +547,8 @@ impl Ui {
         glib::spawn_future_local(async move {
             while let Ok(event) = receiver.recv().await {
                 let Some(ui) = weak.upgrade() else { break };
-                let changed = ui.model.borrow_mut().apply(&event);
+                let recorded = ui.history.borrow_mut().on_event(&event, now());
+                let changed = ui.model.borrow_mut().apply(&event) || recorded;
                 if changed {
                     ui.render();
                     ui.update_tray();
@@ -587,16 +608,61 @@ impl Ui {
             return;
         };
         self.title.set_subtitle(&view.subtitle);
-        self.hero.show(&view);
+        let now = now();
+        let time_left = device.as_ref().and_then(|id| self.history.borrow().minutes_left(id, now)).map(time_left_text);
+        self.hero.show(&view, time_left);
         let rebuild = {
             let rows = self.rows.borrow();
             let controls: Vec<Control> = view.layout().into_iter().map(|(control, _)| control).collect();
-            rows.device != device || rows.controls != controls
+            rows.device != device || rows.controls != controls || rows.has_battery != view.has_battery
         };
         if rebuild {
-            self.build_tabs(&view, device);
+            self.build_tabs(&view, device.clone());
         }
         self.update_rows(&view);
+        if let (Some(graph), Some(id)) = (&self.rows.borrow().graph, &device) {
+            graph.show(self.history.borrow().samples(id), now);
+        }
+    }
+
+    /// The battery graph, with buttons for its span, as a group for the Power tab
+    fn battery_history_group(self: &Rc<Self>, graph: &BatteryGraph) -> adw::PreferencesGroup {
+        graph.set_span(self.history_span.get());
+        let day = gtk::ToggleButton::builder()
+            .name("history-day")
+            .label("24 h")
+            .active(self.history_span.get() == DAY)
+            .build();
+        let week = gtk::ToggleButton::builder()
+            .name("history-week")
+            .label("7 days")
+            .group(&day)
+            .active(self.history_span.get() == WEEK)
+            .build();
+        for (button, span) in [(&day, DAY), (&week, WEEK)] {
+            let weak = Rc::downgrade(self);
+            button.connect_toggled(move |button| {
+                let Some(ui) = weak.upgrade() else { return };
+                if button.is_active() {
+                    ui.history_span.set(span);
+                    if let Some(graph) = &ui.rows.borrow().graph {
+                        graph.set_span(span);
+                    }
+                }
+            });
+        }
+        let buttons = gtk::Box::builder().css_classes(["linked"]).valign(gtk::Align::Center).build();
+        buttons.append(&day);
+        buttons.append(&week);
+        let card = gtk::Frame::builder().css_classes(["card"]).child(&graph.widget).build();
+        graph.widget.set_margin_top(10);
+        graph.widget.set_margin_bottom(6);
+        graph.widget.set_margin_start(12);
+        graph.widget.set_margin_end(12);
+        let group = adw::PreferencesGroup::builder().title("BATTERY HISTORY").build();
+        group.set_header_suffix(Some(&buttons));
+        group.add(&card);
+        group
     }
 
     /// Lists the connected headsets in the sidebar and highlights the one shown
@@ -659,8 +725,12 @@ impl Ui {
         }
         let mut rows = HashMap::new();
         let mut pages = Vec::new();
+        let graph = view.has_battery.then(BatteryGraph::new);
         for tab in view.tabs() {
             let page = gtk::Box::builder().name(tab.name()).orientation(gtk::Orientation::Vertical).spacing(24).build();
+            if let (Tab::Power, Some(graph)) = (tab, &graph) {
+                page.append(&self.battery_history_group(graph));
+            }
             for section in view.sections.iter().filter(|section| section.tab == tab) {
                 let group = adw::PreferencesGroup::builder().title(section.title.to_uppercase()).build();
                 group.set_description(section.description);
@@ -679,7 +749,7 @@ impl Ui {
             pages.push(page.upcast());
         }
         let controls = view.layout().into_iter().map(|(control, _)| control).collect();
-        self.rows.replace(Rows { device, controls, pages, rows });
+        self.rows.replace(Rows { device, controls, has_battery: view.has_battery, pages, rows, graph });
     }
 
     fn build_row(self: &Rc<Self>, view: &ControlView) -> Row {

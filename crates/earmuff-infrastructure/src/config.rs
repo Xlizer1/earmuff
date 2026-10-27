@@ -4,7 +4,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use earmuff_application::{Autostart, Preferences, PreferencesStore, ProfileStore};
+use earmuff_application::{Autostart, HistoryStore, Preferences, PreferencesStore, ProfileStore, Sample};
 use earmuff_domain::{AutoOff, Gain, NoiseFilter, Percent, Setting, UsbId};
 use serde_json::{Map, Value, json};
 
@@ -183,6 +183,65 @@ impl ProfileStore for JsonProfileStore {
     }
 }
 
+/// Battery readings as one CSV file per headset model (time,level,charging), under
+/// $XDG_STATE_HOME/earmuff
+#[derive(Debug)]
+pub struct CsvHistoryStore {
+    dir: PathBuf,
+}
+
+impl CsvHistoryStore {
+    pub fn in_state_dir() -> Self {
+        CsvHistoryStore::at(state_dir())
+    }
+
+    pub fn at(dir: impl Into<PathBuf>) -> Self {
+        CsvHistoryStore { dir: dir.into() }
+    }
+
+    fn file(&self, headset: UsbId) -> PathBuf {
+        self.dir.join(format!("battery-{:04x}-{:04x}.csv", headset.vendor, headset.product))
+    }
+}
+
+fn parse_sample(line: &str) -> Option<Sample> {
+    let mut fields = line.split(',');
+    let sample = Sample {
+        at: fields.next()?.trim().parse().ok()?,
+        level: fields.next()?.trim().parse::<u8>().ok().filter(|level| *level <= 100)?,
+        charging: fields.next()?.trim() == "1",
+    };
+    fields.next().is_none().then_some(sample)
+}
+
+fn sample_line(sample: &Sample) -> String {
+    format!("{},{},{}\n", sample.at, sample.level, u8::from(sample.charging))
+}
+
+impl HistoryStore for CsvHistoryStore {
+    fn load(&self, headset: UsbId, since: u64) -> Vec<Sample> {
+        let path = self.file(headset);
+        let Ok(text) = fs::read_to_string(&path) else { return Vec::new() };
+        let all: Vec<Sample> = text.lines().filter_map(parse_sample).collect();
+        let kept: Vec<Sample> = all.iter().filter(|s| s.at >= since).copied().collect();
+        // drop old readings from the file once they make up half of it
+        if kept.len() * 2 < all.len() {
+            let text: String = kept.iter().map(sample_line).collect();
+            let _ = write_atomically(&path, text.as_bytes());
+        }
+        kept
+    }
+
+    fn append(&self, headset: UsbId, sample: Sample) -> Result<(), String> {
+        use std::io::Write as _;
+        let path = self.file(headset);
+        let error = |e: io::Error| format!("{}: {e}", path.display());
+        fs::create_dir_all(&self.dir).map_err(error)?;
+        let mut file = fs::OpenOptions::new().create(true).append(true).open(&path).map_err(error)?;
+        file.write_all(sample_line(&sample).as_bytes()).map_err(error)
+    }
+}
+
 /// Start-on-login through an XDG autostart entry, which GNOME, KDE and most desktops run
 #[derive(Debug)]
 pub struct XdgAutostart {
@@ -348,5 +407,43 @@ mod tests {
             r#"{"0001:0002": {"lights": true, "mic_volume": 200, "mute_led": 9, "noise_filter": "max", "rgb": 1}}"#;
         write_atomically(&path, text.as_bytes()).unwrap();
         assert_eq!(JsonProfileStore::at(path).load(UsbId::new(1, 2)), [Setting::Lights(true)]);
+    }
+
+    #[test]
+    fn history_appends_and_loads_readings() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = CsvHistoryStore::at(dir.path().join("state"));
+        let headset = UsbId::new(0x03F0, 0x098D);
+        let samples = [Sample { at: 100, level: 80, charging: false }, Sample { at: 400, level: 79, charging: true }];
+        for sample in samples {
+            store.append(headset, sample).unwrap();
+        }
+        assert_eq!(store.load(headset, 0), samples);
+        assert_eq!(store.load(headset, 200), samples[1..]);
+        assert!(dir.path().join("state/battery-03f0-098d.csv").is_file());
+        assert_eq!(store.load(UsbId::new(1, 1), 0), []);
+    }
+
+    #[test]
+    fn history_drops_old_readings_from_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = CsvHistoryStore::at(dir.path());
+        let headset = UsbId::new(1, 2);
+        for at in 0..10 {
+            store.append(headset, Sample { at, level: 50, charging: false }).unwrap();
+        }
+        assert_eq!(store.load(headset, 8).len(), 2);
+        let lines = fs::read_to_string(dir.path().join("battery-0001-0002.csv")).unwrap().lines().count();
+        assert_eq!(lines, 2);
+    }
+
+    #[test]
+    fn history_skips_broken_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let text = "100,80,0\ngarbage\n200,180,0\n300,70,1,extra\n400,60,1\n";
+        fs::write(dir.path().join("battery-0001-0002.csv"), text).unwrap();
+        let loaded = CsvHistoryStore::at(dir.path()).load(UsbId::new(1, 2), 0);
+        let levels: Vec<u8> = loaded.iter().map(|s| s.level).collect();
+        assert_eq!(levels, [80, 60]);
     }
 }
