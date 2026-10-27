@@ -12,16 +12,19 @@ repository = "https://github.com/Xlizer1/earmuff"
 [workspace.dependencies]
 earmuff-application = { path = "crates/earmuff-application" }
 earmuff-domain = { path = "crates/earmuff-domain" }
+earmuff-infrastructure = { path = "crates/earmuff-infrastructure" }
 earmuff-protocols = { path = "crates/earmuff-protocols" }
+
 adw = { version = "0.9.2", package = "libadwaita", features = ["v1_4"] }
 async-channel = "2.5.0"
 clap = { version = "4.6.7", features = ["derive"] }
-glib-unix = "0.22.8"
 gtk = { version = "0.11.5", package = "gtk4" }
 ksni = { version = "0.3.7", default-features = false, features = ["async-io"] }
-libc = "0.2.191"
 rustix = { version = "1.1.6", features = ["event"] }
 serde_json = "1.0.154"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }

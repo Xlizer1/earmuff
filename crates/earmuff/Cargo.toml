@@ -1,6 +1,6 @@
 [package]
 name = "earmuff"
-description = "Battery and settings for the HyperX Cloud Alpha Wireless"
+description = "Battery and settings for your gaming headset, in place of vendor apps like HyperX NGENUITY"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,13 +8,14 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+earmuff-application.workspace = true
+earmuff-domain.workspace = true
+earmuff-infrastructure.workspace = true
 adw.workspace = true
 async-channel.workspace = true
 clap.workspace = true
-glib-unix.workspace = true
 gtk.workspace = true
 ksni.workspace = true
-libc.workspace = true
 serde_json.workspace = true
 
 [lints]
