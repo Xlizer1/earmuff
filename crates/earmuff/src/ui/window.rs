@@ -1,5 +1,8 @@
 //! The main window. It shows what the [`Model`] says and sends the user's changes to
 //! the device manager, which talks to the headset on its own thread.
+//!
+//! Layout: a sidebar listing every headset; next to it a banner with the headset's
+//! art, name, status and battery ring, and below that a tab per kind of setting.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -15,8 +18,9 @@ use gtk::glib::{self, SourceId};
 use ksni::TrayMethods;
 
 use super::UiOptions;
+use super::battery_ring::BatteryRing;
 use super::view_model::{
-    ACCENTS, Control, ControlView, DeviceView, Input, Model, Page, Widget, accent_class, accent_index,
+    ACCENTS, Control, ControlView, DeviceView, Input, Model, Page, SidebarItem, Widget, accent_class, accent_index,
 };
 use crate::tray::{HeadsetTray, TrayEvent, TrayState};
 
@@ -47,32 +51,86 @@ enum Row {
     Info(adw::ActionRow),
 }
 
-struct BatteryRow {
-    row: adw::ActionRow,
-    bar: gtk::LevelBar,
-    label: gtk::Label,
-}
-
-/// The settings page as currently built
+/// The tabs as currently built
 #[derive(Default)]
 struct Rows {
     device: Option<DeviceId>,
     controls: Vec<Control>,
-    battery: Option<BatteryRow>,
+    pages: Vec<gtk::Widget>,
     rows: HashMap<Control, Row>,
+}
+
+/// One headset's entry in the sidebar
+struct SidebarRow {
+    status: gtk::Label,
+    battery: gtk::LevelBar,
+}
+
+/// The banner over the tabs
+struct Hero {
+    widget: gtk::Box,
+    name: gtk::Label,
+    detail: gtk::Label,
+    badge: gtk::Label,
+    ring: BatteryRing,
+}
+
+impl Hero {
+    fn new() -> Self {
+        let art = gtk::Image::builder()
+            .icon_name("earmuff-headset-symbolic")
+            .pixel_size(108)
+            .css_classes(["hero-art"])
+            .valign(gtk::Align::Center)
+            .build();
+        let name = gtk::Label::builder().name("hero-name").css_classes(["hero-name"]).xalign(0.0).wrap(true).build();
+        let detail = gtk::Label::builder().name("hero-detail").css_classes(["dim-label"]).xalign(0.0).build();
+        let badge = gtk::Label::builder().name("badge").css_classes(["badge"]).halign(gtk::Align::Start).build();
+        let text = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(6)
+            .valign(gtk::Align::Center)
+            .hexpand(true)
+            .build();
+        text.append(&name);
+        text.append(&detail);
+        text.append(&badge);
+        let ring = BatteryRing::new();
+        let widget = gtk::Box::builder().name("hero").spacing(28).css_classes(["hero"]).build();
+        widget.append(&art);
+        widget.append(&text);
+        widget.append(&ring.widget);
+        Hero { widget, name, detail, badge, ring }
+    }
+
+    fn show(&self, view: &DeviceView) {
+        self.name.set_label(&view.title.to_uppercase());
+        self.detail.set_label(&view.detail);
+        self.badge.set_label(view.badge);
+        for (class, on) in [("charging", view.charging), ("off", view.badge == "OFF")] {
+            if on {
+                self.badge.add_css_class(class);
+            } else {
+                self.badge.remove_css_class(class);
+            }
+        }
+        self.ring.widget.set_visible(view.has_battery);
+        self.ring.show(view.battery, &view.battery_text, &view.charge_text, view.battery_low, view.charging);
+    }
 }
 
 struct Ui {
     app: adw::Application,
     window: adw::ApplicationWindow,
     title: adw::WindowTitle,
-    picker: gtk::DropDown,
-    picker_ids: RefCell<Vec<DeviceId>>,
+    device_list: gtk::ListBox,
+    sidebar_ids: RefCell<Vec<DeviceId>>,
+    sidebar_rows: RefCell<Vec<SidebarRow>>,
     toasts: adw::ToastOverlay,
     stack: gtk::Stack,
     missing_page: adw::StatusPage,
-    /// Holds the settings page, which is rebuilt when the headset or its controls change
-    settings: adw::Bin,
+    hero: Hero,
+    tabs: adw::ViewStack,
     rows: RefCell<Rows>,
 
     model: RefCell<Model>,
@@ -91,14 +149,24 @@ struct Ui {
 
 impl Ui {
     fn new(app: &adw::Application, store: Arc<dyn PreferencesStore>) -> Rc<Ui> {
+        // sidebar: every connected headset
+        let device_list = gtk::ListBox::builder().name("device-list").css_classes(["navigation-sidebar"]).build();
+        device_list.set_placeholder(Some(
+            &gtk::Label::builder().label("No headsets").css_classes(["dim-label"]).margin_top(24).build(),
+        ));
+        let sidebar_header = adw::HeaderBar::builder()
+            .show_end_title_buttons(false)
+            .title_widget(&gtk::Box::new(gtk::Orientation::Horizontal, 0))
+            .build();
+        sidebar_header.pack_start(&gtk::Label::builder().label("HEADSETS").css_classes(["sidebar-heading"]).build());
+        let sidebar = adw::ToolbarView::builder()
+            .content(&gtk::ScrolledWindow::builder().child(&device_list).vexpand(true).build())
+            .build();
+        sidebar.add_top_bar(&sidebar_header);
+
+        // content: header, then the missing / off / settings pages
         let title = adw::WindowTitle::new("Earmuff", "");
         title.set_widget_name("title");
-        let picker = gtk::DropDown::builder()
-            .name("device-picker")
-            .model(&gtk::StringList::new(&[]))
-            .tooltip_text("Headset")
-            .visible(false)
-            .build();
         let menu = gio::Menu::new();
         menu.append(Some("Preferences"), Some("app.preferences"));
         menu.append(Some("Quit"), Some("app.quit"));
@@ -108,8 +176,10 @@ impl Ui {
             .menu_model(&menu)
             .tooltip_text("Menu")
             .build();
+        let sidebar_button =
+            gtk::ToggleButton::builder().icon_name("sidebar-show-symbolic").tooltip_text("Headsets").build();
         let header = adw::HeaderBar::builder().title_widget(&title).build();
-        header.pack_start(&picker);
+        header.pack_start(&sidebar_button);
         header.pack_end(&menu_button);
 
         let missing_page = adw::StatusPage::builder()
@@ -123,35 +193,77 @@ impl Ui {
             .title("Headset is off")
             .description("Turn it on with the power button.")
             .build();
-        let settings = adw::Bin::builder().name("settings-page").build();
+
+        let hero = Hero::new();
+        let tabs = adw::ViewStack::builder().name("tabs").vhomogeneous(false).build();
+        let switcher = adw::ViewSwitcher::builder()
+            .stack(&tabs)
+            .policy(adw::ViewSwitcherPolicy::Wide)
+            .halign(gtk::Align::Center)
+            .build();
+        let settings = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(18)
+            .margin_top(18)
+            .margin_bottom(24)
+            .margin_start(18)
+            .margin_end(18)
+            .build();
+        settings.append(&hero.widget);
+        settings.append(&switcher);
+        settings.append(&tabs);
+        let settings_page = gtk::ScrolledWindow::builder()
+            .name("settings-page")
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .child(&adw::Clamp::builder().maximum_size(880).child(&settings).build())
+            .build();
 
         let stack = gtk::Stack::builder().name("pages").transition_type(gtk::StackTransitionType::Crossfade).build();
         stack.add_named(&missing_page, Some("missing"));
         stack.add_named(&off_page, Some("off"));
-        stack.add_named(&settings, Some("settings"));
+        stack.add_named(&settings_page, Some("settings"));
         let toasts = adw::ToastOverlay::new();
         toasts.set_child(Some(&stack));
+        let content = adw::ToolbarView::builder().content(&toasts).build();
+        content.add_top_bar(&header);
 
-        let view = adw::ToolbarView::builder().content(&toasts).build();
-        view.add_top_bar(&header);
+        let split = adw::OverlaySplitView::builder()
+            .name("split")
+            .sidebar(&sidebar)
+            .content(&content)
+            .min_sidebar_width(220.0)
+            .max_sidebar_width(280.0)
+            .build();
+        split.bind_property("show-sidebar", &sidebar_button, "active").bidirectional().sync_create().build();
+        split.bind_property("collapsed", &sidebar_button, "visible").sync_create().build();
+
         let window = adw::ApplicationWindow::builder()
             .application(app)
             .title("Earmuff")
-            .default_width(460)
-            .default_height(660)
-            .content(&view)
+            .default_width(1000)
+            .default_height(720)
+            .width_request(360)
+            .height_request(480)
+            .content(&split)
             .build();
+        // narrow windows fold the sidebar away; the header button brings it back
+        let narrow =
+            adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 720sp").expect("valid condition"));
+        narrow.add_setter(&split, "collapsed", Some(&true.to_value()));
+        window.add_breakpoint(narrow);
 
         Rc::new(Ui {
             app: app.clone(),
             window,
             title,
-            picker,
-            picker_ids: RefCell::default(),
+            device_list,
+            sidebar_ids: RefCell::default(),
+            sidebar_rows: RefCell::default(),
             toasts,
             stack,
             missing_page,
-            settings,
+            hero,
+            tabs,
             rows: RefCell::default(),
             model: RefCell::new(Model::default()),
             manager: RefCell::new(None),
@@ -228,12 +340,12 @@ impl Ui {
 
     fn connect_signals(self: &Rc<Self>) {
         let weak = Rc::downgrade(self);
-        self.picker.connect_selected_notify(move |picker| {
-            let Some(ui) = weak.upgrade() else { return };
+        self.device_list.connect_row_selected(move |_, row| {
+            let (Some(ui), Some(row)) = (weak.upgrade(), row) else { return };
             if ui.syncing.get() {
                 return;
             }
-            let id = ui.picker_ids.borrow().get(picker.selected() as usize).cloned();
+            let id = ui.sidebar_ids.borrow().get(usize::try_from(row.index()).unwrap_or(usize::MAX)).cloned();
             if let Some(id) = id
                 && ui.model.borrow_mut().select(&id)
             {
@@ -316,7 +428,7 @@ impl Ui {
     }
 
     fn render(self: &Rc<Self>) {
-        self.sync_picker();
+        self.sync_sidebar();
         let (title, page, view, device) = {
             let model = self.model.borrow();
             (model.title(), model.page(), model.view(), model.current().map(|(info, _)| info.id.clone()))
@@ -334,75 +446,100 @@ impl Ui {
             self.title.set_subtitle("");
             return;
         };
+        self.title.set_subtitle(&view.subtitle);
+        self.hero.show(&view);
         let rebuild = {
             let rows = self.rows.borrow();
             let controls: Vec<Control> = view.layout().into_iter().map(|(control, _)| control).collect();
-            rows.device != device || rows.controls != controls || rows.battery.is_some() != view.has_battery
+            rows.device != device || rows.controls != controls
         };
         if rebuild {
-            self.build_rows(&view, device);
+            self.build_tabs(&view, device);
         }
         self.update_rows(&view);
     }
 
-    /// Lists the connected headsets in the picker, which shows when there are several
-    fn sync_picker(&self) {
+    /// Lists the connected headsets in the sidebar and highlights the one shown
+    fn sync_sidebar(&self) {
         let model = self.model.borrow();
-        let ids: Vec<DeviceId> = model.devices().map(|info| info.id.clone()).collect();
+        let items = model.sidebar();
+        let ids: Vec<DeviceId> = items.iter().map(|item| item.id.clone()).collect();
         self.syncing.set(true);
-        if *self.picker_ids.borrow() != ids {
-            let names: Vec<String> = model.devices().map(|info| info.name.clone()).collect();
-            let names: Vec<&str> = names.iter().map(String::as_str).collect();
-            self.picker.set_model(Some(&gtk::StringList::new(&names)));
-            self.picker_ids.replace(ids.clone());
+        if *self.sidebar_ids.borrow() != ids {
+            while let Some(child) = self.device_list.first_child() {
+                self.device_list.remove(&child);
+            }
+            let rows: Vec<SidebarRow> = items.iter().map(|item| self.add_sidebar_row(item)).collect();
+            self.sidebar_rows.replace(rows);
+            self.sidebar_ids.replace(ids.clone());
         }
-        self.picker.set_visible(ids.len() > 1);
-        if let Some(index) = model.current().and_then(|(info, _)| ids.iter().position(|id| *id == info.id)) {
-            self.picker.set_selected(index as u32);
+        for (item, row) in items.iter().zip(self.sidebar_rows.borrow().iter()) {
+            row.status.set_label(&item.status);
+            row.battery.set_visible(item.battery.is_some());
+            row.battery.set_value(item.battery.map_or(0.0, f64::from));
+        }
+        let current = model.current().and_then(|(info, _)| ids.iter().position(|id| *id == info.id));
+        if let Some(row) = current.and_then(|index| self.device_list.row_at_index(index as i32)) {
+            self.device_list.select_row(Some(&row));
         }
         self.syncing.set(false);
     }
 
-    fn build_rows(self: &Rc<Self>, view: &DeviceView, device: Option<DeviceId>) {
+    fn add_sidebar_row(&self, item: &SidebarItem) -> SidebarRow {
+        let name = gtk::Label::builder()
+            .label(&item.name)
+            .css_classes(["sidebar-name"])
+            .xalign(0.0)
+            .ellipsize(gtk::pango::EllipsizeMode::End)
+            .build();
+        let status = gtk::Label::builder().css_classes(["caption", "dim-label"]).xalign(0.0).build();
+        let battery = gtk::LevelBar::builder().min_value(0.0).max_value(100.0).css_classes(["sidebar-battery"]).build();
+        let content = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(4)
+            .margin_top(8)
+            .margin_bottom(8)
+            .margin_start(4)
+            .margin_end(4)
+            .build();
+        content.append(&name);
+        content.append(&status);
+        content.append(&battery);
+        self.device_list.append(&content);
+        SidebarRow { status, battery }
+    }
+
+    /// Builds a tab for each kind of setting the headset has
+    fn build_tabs(self: &Rc<Self>, view: &DeviceView, device: Option<DeviceId>) {
         for (_, timer) in self.level_timers.borrow_mut().drain() {
             timer.remove();
         }
-        let page = adw::PreferencesPage::new();
-        let battery = view.has_battery.then(|| {
-            let bar = gtk::LevelBar::builder()
-                .name("battery-bar")
-                .min_value(0.0)
-                .max_value(100.0)
-                .valign(gtk::Align::Center)
-                .width_request(120)
-                .build();
-            let label = gtk::Label::builder().name("battery-label").width_chars(4).xalign(1.0).build();
-            let row = adw::ActionRow::builder().name("battery").title("Battery").build();
-            row.add_suffix(&bar);
-            row.add_suffix(&label);
-            let group = adw::PreferencesGroup::new();
-            group.add(&row);
-            page.add(&group);
-            BatteryRow { row, bar, label }
-        });
-        let mut rows = HashMap::new();
-        for section in &view.sections {
-            let group = adw::PreferencesGroup::builder().title(section.title).build();
-            group.set_description(section.description);
-            for control in &section.controls {
-                let row = self.build_row(control);
-                group.add(match &row {
-                    Row::Switch(row) => row.upcast_ref::<gtk::Widget>(),
-                    Row::Level(row, _) | Row::Info(row) => row.upcast_ref(),
-                    Row::Choice(row) => row.upcast_ref(),
-                });
-                rows.insert(control.control, row);
-            }
-            page.add(&group);
+        for page in self.rows.borrow().pages.iter() {
+            self.tabs.remove(page);
         }
-        self.settings.set_child(Some(&page));
+        let mut rows = HashMap::new();
+        let mut pages = Vec::new();
+        for tab in view.tabs() {
+            let page = gtk::Box::builder().name(tab.name()).orientation(gtk::Orientation::Vertical).spacing(24).build();
+            for section in view.sections.iter().filter(|section| section.tab == tab) {
+                let group = adw::PreferencesGroup::builder().title(section.title.to_uppercase()).build();
+                group.set_description(section.description);
+                for control in &section.controls {
+                    let row = self.build_row(control);
+                    group.add(match &row {
+                        Row::Switch(row) => row.upcast_ref::<gtk::Widget>(),
+                        Row::Level(row, _) | Row::Info(row) => row.upcast_ref(),
+                        Row::Choice(row) => row.upcast_ref(),
+                    });
+                    rows.insert(control.control, row);
+                }
+                page.append(&group);
+            }
+            self.tabs.add_titled_with_icon(&page, Some(tab.name()), tab.title(), tab.icon());
+            pages.push(page.upcast());
+        }
         let controls = view.layout().into_iter().map(|(control, _)| control).collect();
-        self.rows.replace(Rows { device, controls, battery, rows });
+        self.rows.replace(Rows { device, controls, pages, rows });
     }
 
     fn build_row(self: &Rc<Self>, view: &ControlView) -> Row {
@@ -457,15 +594,7 @@ impl Ui {
 
     fn update_rows(&self, view: &DeviceView) {
         self.syncing.set(true);
-        self.title.set_subtitle(&view.subtitle);
         let rows = self.rows.borrow();
-        if let Some(battery) = &rows.battery {
-            if let Some(level) = view.battery {
-                battery.bar.set_value(level.into());
-            }
-            battery.label.set_label(&view.battery_text);
-            battery.row.set_subtitle(&view.charge_text);
-        }
         for control in view.sections.iter().flat_map(|section| &section.controls) {
             match (rows.rows.get(&control.control), &control.widget) {
                 (Some(Row::Switch(row)), Widget::Switch(on)) => {

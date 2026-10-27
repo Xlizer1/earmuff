@@ -1,5 +1,6 @@
 //! The GTK4/libadwaita window and the tray icon.
 
+mod battery_ring;
 pub mod view_model;
 mod window;
 

@@ -42,6 +42,16 @@ async fn scenario(app: adw::Application, headset: DemoHeadset, other: FullHeadse
     until("the color as the subtitle", || title.subtitle() == "Black/Red").await?;
     ensure(title.title() == "Cloud Alpha Wireless (demo)", format!("title is {}", title.title()))?;
 
+    // the banner shows the headset, its state and battery
+    let hero_name: gtk::Label = find(&window, "hero-name")?;
+    let badge: gtk::Label = find(&window, "badge")?;
+    ensure(hero_name.label() == "CLOUD ALPHA WIRELESS (DEMO)", format!("banner says {}", hero_name.label()))?;
+    ensure(badge.label() == "CONNECTED", format!("badge says {}", badge.label()))?;
+    headset.with(|sim, now| sim.set_charging(1, now));
+    until("the charging badge", || badge.label() == "CHARGING" && badge.has_css_class("charging")).await?;
+    headset.with(|sim, now| sim.set_charging(0, now));
+    until("the connected badge", || badge.label() == "CONNECTED").await?;
+
     // the gaming stylesheet parses cleanly
     let errors = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let provider = gtk::CssProvider::new();
@@ -97,10 +107,10 @@ async fn scenario(app: adw::Application, headset: DemoHeadset, other: FullHeadse
     // only the controls the headset has: the Cloud Alpha has no lights
     ensure(find::<adw::SwitchRow>(&window, "lights").is_err(), "no lights control on the Cloud Alpha")?;
 
-    // the picker switches to the demo headset with every feature
-    let picker: gtk::DropDown = find(&window, "device-picker")?;
-    until("the picker to show both headsets", || picker.is_visible()).await?;
-    picker.set_selected(1);
+    // the sidebar switches to the demo headset with every feature
+    let list: gtk::ListBox = find(&window, "device-list")?;
+    until("both headsets in the sidebar", || list.row_at_index(1).is_some()).await?;
+    list.select_row(list.row_at_index(1).as_ref());
     until("the other headset", || title.title() == "Earmuff Demo Headset").await?;
     until("its settings", || find::<adw::SwitchRow>(&window, "lights").is_ok()).await?;
     let lights: adw::SwitchRow = find(&window, "lights")?;
@@ -125,7 +135,7 @@ async fn scenario(app: adw::Application, headset: DemoHeadset, other: FullHeadse
     until("the ChatMix reading", || chatmix.subtitle().as_deref() == Some("20 (more game)")).await?;
 
     // and back to the Cloud Alpha
-    picker.set_selected(0);
+    list.select_row(list.row_at_index(0).as_ref());
     until("the Cloud Alpha again", || title.title() == "Cloud Alpha Wireless (demo)").await?;
 
     // the headset turns off; a setting changes meanwhile; it turns back on

@@ -114,8 +114,50 @@ pub struct ControlView {
     pub sensitive: bool,
 }
 
+/// The tabs of the settings page, in order
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Tab {
+    Audio,
+    Microphone,
+    Lighting,
+    Power,
+}
+
+impl Tab {
+    pub const ALL: [Tab; 4] = [Tab::Audio, Tab::Microphone, Tab::Lighting, Tab::Power];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Tab::Audio => "Audio",
+            Tab::Microphone => "Microphone",
+            Tab::Lighting => "Lighting",
+            Tab::Power => "Power",
+        }
+    }
+
+    /// The page's name in the tab stack
+    pub fn name(self) -> &'static str {
+        match self {
+            Tab::Audio => "audio",
+            Tab::Microphone => "microphone",
+            Tab::Lighting => "lighting",
+            Tab::Power => "power",
+        }
+    }
+
+    pub fn icon(self) -> &'static str {
+        match self {
+            Tab::Audio => "earmuff-headset-symbolic",
+            Tab::Microphone => "audio-input-microphone-symbolic",
+            Tab::Lighting => "display-brightness-symbolic",
+            Tab::Power => "battery-good-symbolic",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SectionView {
+    pub tab: Tab,
     pub title: &'static str,
     pub description: Option<&'static str>,
     pub controls: Vec<ControlView>,
@@ -126,12 +168,31 @@ pub struct SectionView {
 pub struct DeviceView {
     pub title: String,
     pub subtitle: String,
+    /// Under the name in the banner: vendor and color
+    pub detail: String,
+    /// The banner's status pill, e.g. CONNECTED
+    pub badge: &'static str,
+    pub charging: bool,
     pub has_battery: bool,
-    /// Battery percentage for the level bar
+    /// Battery percentage for the battery ring
     pub battery: Option<u8>,
     pub battery_text: String,
     pub charge_text: String,
+    /// At or below the low-battery mark
+    pub battery_low: bool,
     pub sections: Vec<SectionView>,
+}
+
+/// Battery at or below this is shown as low
+pub const LOW_BATTERY: u8 = 15;
+
+/// One headset in the sidebar
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SidebarItem {
+    pub id: DeviceId,
+    pub name: String,
+    pub status: String,
+    pub battery: Option<u8>,
 }
 
 impl DeviceView {
@@ -149,6 +210,20 @@ impl DeviceView {
 
     pub fn control(&self, control: Control) -> Option<&ControlView> {
         self.sections.iter().flat_map(|section| &section.controls).find(|c| c.control == control)
+    }
+
+    /// The tabs this headset needs, in order
+    pub fn tabs(&self) -> Vec<Tab> {
+        Tab::ALL.into_iter().filter(|tab| self.sections.iter().any(|section| section.tab == *tab)).collect()
+    }
+}
+
+fn charge_text(status: &Status) -> &'static str {
+    match status.charge {
+        Some(ChargeState::Discharging) => "On battery",
+        Some(ChargeState::Charging) => "Charging",
+        Some(ChargeState::Full) => "Fully charged",
+        Some(ChargeState::Unknown) | None => "",
     }
 }
 
@@ -201,6 +276,27 @@ impl Model {
         self.devices.iter().map(|(info, _)| info)
     }
 
+    /// Every connected headset, for the sidebar
+    pub fn sidebar(&self) -> Vec<SidebarItem> {
+        self.devices
+            .iter()
+            .map(|(info, s)| SidebarItem {
+                id: info.id.clone(),
+                name: info.name.clone(),
+                status: match (s.connected, s.battery) {
+                    (None, _) => "Connecting…".into(),
+                    (Some(false), _) => "Off".into(),
+                    (Some(true), Some(level)) if s.charge.is_some_and(|c| c.is_plugged_in()) => {
+                        format!("{level} · charging")
+                    }
+                    (Some(true), Some(level)) => level.to_string(),
+                    (Some(true), None) => "Connected".into(),
+                },
+                battery: s.battery.map(Percent::get),
+            })
+            .collect()
+    }
+
     /// Shows another headset; returns false if it isn't connected
     pub fn select(&mut self, id: &DeviceId) -> bool {
         let known = self.devices.iter().any(|(info, _)| info.id == *id);
@@ -233,19 +329,25 @@ impl Model {
 
     pub fn view(&self) -> Option<DeviceView> {
         let (info, s) = self.current()?;
+        let charging = s.charge.is_some_and(|c| c.is_plugged_in());
+        let detail = [Some(info.vendor.clone()), s.color.clone()].into_iter().flatten().collect::<Vec<_>>().join(" · ");
         Some(DeviceView {
             title: info.name.clone(),
             subtitle: s.color.clone().unwrap_or_default(),
+            detail,
+            badge: match (s.connected, s.charge) {
+                (Some(true), Some(ChargeState::Full)) => "FULLY CHARGED",
+                (Some(true), Some(ChargeState::Charging)) => "CHARGING",
+                (Some(true), _) => "CONNECTED",
+                (Some(false), _) => "OFF",
+                (None, _) => "CONNECTING",
+            },
+            charging,
             has_battery: info.supports(Capability::Battery),
             battery: s.battery.map(|b| b.get()),
             battery_text: s.battery.map(|b| b.to_string()).unwrap_or_default(),
-            charge_text: match s.charge {
-                Some(ChargeState::Discharging) => "On battery",
-                Some(ChargeState::Charging) => "Charging",
-                Some(ChargeState::Full) => "Fully charged",
-                Some(ChargeState::Unknown) | None => "",
-            }
-            .into(),
+            charge_text: charge_text(s).into(),
+            battery_low: !charging && s.battery.is_some_and(|b| b.get() <= LOW_BATTERY),
             sections: sections(info, s),
         })
     }
@@ -303,14 +405,15 @@ fn info_row(control: Control, title: &'static str, text: String) -> ControlView 
 fn sections(info: &DeviceInfo, s: &Status) -> Vec<SectionView> {
     let has = |capability| info.supports(capability);
     let mut sections = Vec::new();
-    let mut add = |title, description, controls: Vec<Option<ControlView>>| {
+    let mut add = |tab, title, description, controls: Vec<Option<ControlView>>| {
         let controls: Vec<ControlView> = controls.into_iter().flatten().collect();
         if !controls.is_empty() {
-            sections.push(SectionView { title, description, controls });
+            sections.push(SectionView { tab, title, description, controls });
         }
     };
 
     add(
+        Tab::Microphone,
         "Microphone",
         None,
         vec![
@@ -346,6 +449,7 @@ fn sections(info: &DeviceInfo, s: &Status) -> Vec<SectionView> {
 
     let sidetone_on = s.sidetone.unwrap_or(false);
     add(
+        Tab::Audio,
         "Mic monitoring",
         Some("Hear your own voice in the headset while you talk"),
         vec![
@@ -360,6 +464,7 @@ fn sections(info: &DeviceInfo, s: &Status) -> Vec<SectionView> {
     let presets: Vec<String> =
         info.equalizer.as_ref().map(|eq| eq.presets.iter().map(|p| p.name.clone()).collect()).unwrap_or_default();
     add(
+        Tab::Audio,
         "Sound",
         None,
         vec![
@@ -374,9 +479,15 @@ fn sections(info: &DeviceInfo, s: &Status) -> Vec<SectionView> {
         ],
     );
 
-    add("Lighting", None, vec![has(Capability::Lights).then(|| switch(Control::Lights, "Lights", None, s.lights))]);
+    add(
+        Tab::Lighting,
+        "Lighting",
+        None,
+        vec![has(Capability::Lights).then(|| switch(Control::Lights, "Lights", None, s.lights))],
+    );
 
     add(
+        Tab::Power,
         "Power and sounds",
         None,
         vec![
@@ -394,6 +505,7 @@ fn sections(info: &DeviceInfo, s: &Status) -> Vec<SectionView> {
     );
 
     add(
+        Tab::Power,
         "Bluetooth",
         None,
         vec![
@@ -567,6 +679,7 @@ mod tests {
             "level is greyed out while monitoring is off"
         );
         assert!(view.has_battery);
+        assert_eq!(view.tabs(), [Tab::Audio, Tab::Microphone, Tab::Power]);
     }
 
     #[test]
@@ -598,6 +711,45 @@ mod tests {
         // without an on/off switch, the sidetone level is always adjustable
         assert!(view.control(Control::SidetoneLevel).unwrap().sensitive);
         assert!(view.control(Control::Lights).is_some() && view.control(Control::BtCallVolume).is_some());
+        assert_eq!(view.tabs(), Tab::ALL);
+    }
+
+    #[test]
+    fn the_banner_says_how_the_headset_is_doing() {
+        let on_battery = model_with(
+            &CLOUD_ALPHA,
+            vec![
+                Event::Connected(true),
+                Event::Battery(Percent::saturating(12)),
+                Event::Charge(ChargeState::Discharging),
+            ],
+        );
+        let view = on_battery.view().unwrap();
+        assert_eq!((view.badge, view.charging, view.battery_low), ("CONNECTED", false, true));
+        let charging = model_with(
+            &CLOUD_ALPHA,
+            vec![Event::Connected(true), Event::Battery(Percent::saturating(12)), Event::Charge(ChargeState::Charging)],
+        );
+        let view = charging.view().unwrap();
+        // a charging headset isn't low on battery
+        assert_eq!((view.badge, view.charging, view.battery_low), ("CHARGING", true, false));
+        let full = model_with(&CLOUD_ALPHA, vec![Event::Connected(true), Event::Charge(ChargeState::Full)]);
+        assert_eq!(full.view().unwrap().badge, "FULLY CHARGED");
+    }
+
+    #[test]
+    fn the_sidebar_lists_every_headset() {
+        let mut model = Model::default();
+        model.apply(&AppEvent::Added(alpha("a")));
+        model.apply(&AppEvent::Added(alpha("b")));
+        model.apply(&changed("a", Event::Connected(true)));
+        model.apply(&changed("a", Event::Battery(Percent::saturating(80))));
+        model.apply(&changed("b", Event::Connected(false)));
+        let items = model.sidebar();
+        assert_eq!(items.iter().map(|i| i.status.as_str()).collect::<Vec<_>>(), ["80%", "Off"]);
+        assert_eq!((items[0].name.as_str(), items[0].battery), ("Headset a", Some(80)));
+        model.apply(&changed("a", Event::Charge(ChargeState::Charging)));
+        assert_eq!(model.sidebar()[0].status, "80% · charging");
     }
 
     #[test]
@@ -632,6 +784,7 @@ mod tests {
         let view = model.view().unwrap();
         assert_eq!((view.battery, view.battery_text.as_str()), (Some(99), "99%"));
         assert_eq!((view.charge_text.as_str(), view.subtitle.as_str()), ("Charging", "Black/Red"));
+        assert_eq!(view.detail, "HyperX · Black/Red");
     }
 
     #[test]
