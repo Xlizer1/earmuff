@@ -96,12 +96,23 @@ fn waybar_prints_one_line_of_json() {
 }
 
 #[test]
+fn mute_toggles_for_a_keyboard_shortcut() {
+    // each run gets a fresh simulated headset, with its mic on
+    let output = earmuff(&["set", "mute", "toggle"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "Mic muted\n");
+    let output = earmuff(&["-d", FULL, "set", "mute", "toggle"]);
+    assert_eq!(stdout(&output), "Mic muted\n", "{}", stderr(&output));
+}
+
+#[test]
 fn settings_commands_succeed() {
     let cases: &[&[&str]] = &[
         &["set", "sidetone", "40%"],
         &["set", "sidetone", "off"],
         &["set", "auto-off", "30"],
         &["set", "mute", "on"],
+        &["set", "mute", "off"],
         &["set", "voice-prompts", "off"],
         &["-d", FULL, "set", "lights", "off"],
         &["-d", FULL, "set", "rotate-to-mute", "off"],
@@ -141,7 +152,7 @@ fn invalid_values_are_rejected_with_a_reason() {
     for (args, reason) in [
         (&["set", "sidetone", "101"][..], "use on, off, or a level from 0 to 100%"),
         (&["set", "auto-off", "300"], "300 is not in 0..=255"),
-        (&["set", "mute", "maybe"], "possible values: on, off"),
+        (&["set", "mute", "maybe"], "possible values: on, off, toggle"),
         (&["set", "noise-filter", "max"], "use off, low or high"),
         (&["set", "mute-led", "9"], "9 is not in 0..=3"),
     ] {

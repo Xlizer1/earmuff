@@ -9,7 +9,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use earmuff_application::{Backend, Session, SessionError, apply_settings, discover, open_device, read_status};
+use earmuff_application::{
+    Backend, Session, SessionError, apply_settings, discover, open_device, read_status, toggle_mute,
+};
 use earmuff_domain::{AutoOff, DeviceInfo, Gain, NoiseFilter, Percent, Query, Setting, UsbId};
 use gtk::glib;
 
@@ -71,8 +73,8 @@ pub enum Command {
 
 #[derive(Debug, Subcommand)]
 pub enum SetCommand {
-    /// Mute the microphone
-    Mute { value: OnOff },
+    /// Mute the microphone; `toggle` flips it, for a keyboard shortcut
+    Mute { value: MuteValue },
     /// Mic monitoring (hearing your own voice): on, off, or a level from 0 to 100%
     Sidetone {
         #[arg(value_parser = parse_sidetone)]
@@ -108,6 +110,13 @@ pub enum SetCommand {
         #[arg(allow_hyphen_values = true)]
         curve: Curve,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum MuteValue {
+    On,
+    Off,
+    Toggle,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -172,7 +181,9 @@ pub fn find_preset(info: &DeviceInfo, wanted: &str) -> Result<u8, String> {
 /// The settings a `set` command changes, in the order they are sent
 pub fn settings(command: &SetCommand, info: &DeviceInfo) -> Result<Vec<Setting>, String> {
     Ok(match command {
-        SetCommand::Mute { value } => vec![Setting::MicMuted((*value).into())],
+        SetCommand::Mute { value: MuteValue::On } => vec![Setting::MicMuted(true)],
+        SetCommand::Mute { value: MuteValue::Off } => vec![Setting::MicMuted(false)],
+        SetCommand::Mute { value: MuteValue::Toggle } => return Err("toggling depends on the headset's mute".into()),
         SetCommand::Sidetone { value: Sidetone::Off } => vec![Setting::Sidetone(false)],
         SetCommand::Sidetone { value: Sidetone::On } => vec![Setting::Sidetone(true)],
         SetCommand::Sidetone { value: Sidetone::Level(level) } => {
@@ -265,6 +276,15 @@ fn execute(session: &mut dyn Session, command: &Command) -> Result<(), Failure> 
             } else {
                 print!("{}", status_text(session.info(), &status));
             }
+        }
+        Command::Set { setting: SetCommand::Mute { value: MuteValue::Toggle } } => {
+            let muted = toggle_mute(session, TIMEOUT).map_err(|error| match error {
+                SessionError::Rejected(reason) if reason.contains("doesn't say") => {
+                    Failure::Invalid(format!("{reason}; use `earmuff set mute on` or `off` instead"))
+                }
+                error => Failure::Session(error),
+            })?;
+            println!("{}", if muted { "Mic muted" } else { "Mic on" });
         }
         Command::Set { setting } => {
             let settings = settings(setting, session.info()).map_err(Failure::Invalid)?;
@@ -393,6 +413,7 @@ mod tests {
             (&["sidetone", "off"], vec![Setting::Sidetone(false)]),
             (&["auto-off", "0"], vec![Setting::AutoOff(AutoOff::NEVER)]),
             (&["mute", "on"], vec![Setting::MicMuted(true)]),
+            (&["mute", "off"], vec![Setting::MicMuted(false)]),
             (&["lights", "off"], vec![Setting::Lights(false)]),
             (&["rotate-to-mute", "on"], vec![Setting::RotateToMute(true)]),
             (&["mic-volume", "40"], vec![Setting::MicVolume(level)]),

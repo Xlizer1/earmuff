@@ -11,6 +11,8 @@ pub enum Query {
     Connection,
     /// Battery level and charging state
     Battery,
+    /// Whether the mic is muted
+    Mute,
     /// Everything the headset can report
     All,
 }

@@ -90,6 +90,9 @@ fn report(status: &Status, query: Query) -> Vec<Event> {
     if query == Query::Connection {
         return connection.into_iter().collect();
     }
+    if query == Query::Mute && status.connected == Some(true) {
+        return status.mic_muted.map(Event::MicMuted).into_iter().collect();
+    }
     if query == Query::Battery || status.connected != Some(true) {
         return connection.into_iter().chain(battery.into_iter().flatten()).collect();
     }

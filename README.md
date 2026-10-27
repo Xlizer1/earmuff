@@ -55,6 +55,10 @@ earmuff monitor [--raw]           print what the headset reports, live
 `-d VID:PID` picks a headset (see `earmuff list`); without it, Earmuff uses the
 first one it finds. `earmuff set --help` lists every setting.
 
+`earmuff set mute toggle` flips the mic mute and prints the result, which makes a
+handy keyboard shortcut; [docs/shortcuts.md](docs/shortcuts.md) shows how to bind it
+on Hyprland, Sway, GNOME and KDE.
+
 `monitor --raw` prints every report in hex: leave it running, press a button or change
 a setting, and watch which bytes move. That's how new headsets get supported; see
 [docs/protocols](docs/protocols).

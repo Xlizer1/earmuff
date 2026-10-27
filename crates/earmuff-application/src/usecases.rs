@@ -107,6 +107,25 @@ pub fn apply_settings(
     Ok(status)
 }
 
+/// Mutes the mic if it's on and turns it on if it's muted; returns whether it's muted now
+pub fn toggle_mute(session: &mut dyn Session, timeout: Duration) -> Result<bool, SessionError> {
+    session.info().check(&Setting::MicMuted(true))?;
+    let mut status = Status::default();
+    session.query(Query::Connection)?;
+    settle(session, &mut status, timeout)?;
+    if status.connected == Some(false) {
+        return Err(SessionError::Rejected("the headset is off".into()));
+    }
+    // only the mute, not everything: this is often behind a keyboard shortcut
+    session.query(Query::Mute)?;
+    settle(session, &mut status, timeout)?;
+    let Some(muted) = status.mic_muted else {
+        return Err(SessionError::Rejected("the headset doesn't say whether its mic is muted".into()));
+    };
+    let confirmed = apply_settings(session, &[Setting::MicMuted(!muted)], timeout)?;
+    Ok(confirmed.mic_muted.unwrap_or(!muted))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,6 +168,25 @@ mod tests {
         let result = apply_settings(&mut session, &[Setting::MicMuted(true), Setting::Sidetone(true)], TIMEOUT);
         assert_eq!(result, Err(SessionError::Unsupported(Capability::Sidetone)));
         assert!(session.applied().is_empty());
+    }
+
+    #[test]
+    fn toggle_mute_flips_the_mic() {
+        let mut session = FakeSession::new("a")
+            .answering(Query::Connection, vec![Event::Connected(true)])
+            .answering(Query::Mute, vec![Event::MicMuted(false)]);
+        assert_eq!(toggle_mute(&mut session, TIMEOUT), Ok(true));
+        assert_eq!(session.applied(), [Setting::MicMuted(true)]);
+        assert_eq!(session.queries(), [Query::Connection, Query::Mute]);
+    }
+
+    #[test]
+    fn toggle_mute_needs_to_know_the_mute() {
+        let mut session = FakeSession::new("a").answering(Query::Connection, vec![Event::Connected(true)]);
+        assert!(matches!(toggle_mute(&mut session, TIMEOUT), Err(SessionError::Rejected(_))));
+        let mut off = FakeSession::new("a").answering(Query::Connection, vec![Event::Connected(false)]);
+        assert_eq!(toggle_mute(&mut off, TIMEOUT), Err(SessionError::Rejected("the headset is off".into())));
+        assert!(session.applied().is_empty() && off.applied().is_empty());
     }
 
     #[test]

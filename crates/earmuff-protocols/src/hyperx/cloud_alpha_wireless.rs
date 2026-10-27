@@ -117,6 +117,7 @@ impl Codec for CloudAlphaWireless {
         match query {
             Query::Connection => vec![get(cmd::GET_WIRELESS)],
             Query::Battery => vec![get(cmd::GET_BATTERY), get(cmd::GET_CHARGING)],
+            Query::Mute => vec![get(cmd::GET_MUTE)],
             Query::All => QUERY_ALL.map(get).to_vec(),
         }
     }
@@ -199,6 +200,8 @@ mod tests {
 
     #[test]
     fn query_battery_asks_level_and_charging() {
+        let mute: Vec<u8> = CloudAlphaWireless.query(Query::Mute).iter().map(|e| e.report[2]).collect();
+        assert_eq!(mute, [cmd::GET_MUTE]);
         let cmds: Vec<u8> = CloudAlphaWireless.query(Query::Battery).iter().map(|e| e.report[2]).collect();
         assert_eq!(cmds, [cmd::GET_BATTERY, cmd::GET_CHARGING]);
     }
