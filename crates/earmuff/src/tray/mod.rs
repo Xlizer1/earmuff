@@ -147,6 +147,7 @@ mod tests {
             name: "Cloud Alpha Wireless".into(),
             vendor: "HyperX".into(),
             capabilities: vec![],
+            equalizer: None,
         }));
         for event in events {
             model.apply(&AppEvent::Changed(id.clone(), event.clone()));

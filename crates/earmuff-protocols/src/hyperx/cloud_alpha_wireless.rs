@@ -134,6 +134,7 @@ impl Codec for CloudAlphaWireless {
             Setting::VoicePrompts(on) => {
                 vec![set(cmd::SET_VOICE_PROMPTS, &[u8::from(on)]), get(cmd::GET_VOICE_PROMPTS)]
             }
+            _ => return None,
         })
     }
 
@@ -219,7 +220,7 @@ mod tests {
             (Setting::VoicePrompts(false), cmd::SET_VOICE_PROMPTS, cmd::GET_VOICE_PROMPTS),
         ];
         for (setting, set_cmd, get_cmd) in pairs {
-            let exchanges = CloudAlphaWireless.apply(setting).unwrap();
+            let exchanges = CloudAlphaWireless.apply(setting.clone()).unwrap();
             assert_eq!(exchanges.iter().map(|e| e.report[2]).collect::<Vec<_>>(), [set_cmd, get_cmd], "{setting:?}");
         }
         assert_eq!(CloudAlphaWireless.apply(Setting::AutoOff(AutoOff::minutes(30))).unwrap()[0].report[3], 30);

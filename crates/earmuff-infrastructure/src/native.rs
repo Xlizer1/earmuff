@@ -42,6 +42,7 @@ pub fn device_info(codec: &dyn Codec, backend: BackendKind, instance: String) ->
         name: model.name.into(),
         vendor: model.vendor.into(),
         capabilities: model.capabilities.to_vec(),
+        equalizer: None,
     }
 }
 

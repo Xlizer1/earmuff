@@ -85,6 +85,7 @@ impl FakeSession {
             name: format!("Fake {instance}"),
             vendor: "Fake".into(),
             capabilities: ALL_CAPABILITIES.to_vec(),
+            equalizer: None,
         };
         FakeSession {
             info: info.clone(),
@@ -138,16 +139,6 @@ impl FakeSession {
     pub fn applied(&self) -> Vec<Setting> {
         self.handle.applied()
     }
-
-    fn confirmation(setting: Setting) -> Event {
-        match setting {
-            Setting::MicMuted(v) => Event::MicMuted(v),
-            Setting::Sidetone(v) => Event::Sidetone(v),
-            Setting::SidetoneLevel(v) => Event::SidetoneLevel(v),
-            Setting::AutoOff(v) => Event::AutoOff(v),
-            Setting::VoicePrompts(v) => Event::VoicePrompts(v),
-        }
-    }
 }
 
 impl Session for FakeSession {
@@ -169,8 +160,8 @@ impl Session for FakeSession {
             return Err(SessionError::Unsupported(setting.capability()));
         }
         self.handle.update(|s| {
+            s.outbox.extend(setting.confirmation());
             s.applied.push(setting);
-            s.outbox.push_back(FakeSession::confirmation(setting));
         });
         Ok(())
     }

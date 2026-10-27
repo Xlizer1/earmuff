@@ -4,9 +4,11 @@
 //! layers depend on this crate; it depends on nothing.
 
 mod device;
+mod equalizer;
 mod status;
 mod values;
 
-pub use device::{BackendKind, Capability, DeviceId, DeviceInfo, UsbId, UsbIdError};
+pub use device::{BackendKind, Capability, DeviceId, DeviceInfo, SettingError, UsbId, UsbIdError};
+pub use equalizer::{EqPreset, EqualizerSpec, Gain, GainError};
 pub use status::{Event, Query, Setting, Status};
-pub use values::{AutoOff, ChargeState, Percent, PercentError};
+pub use values::{AutoOff, ChargeState, NoiseFilter, Percent, PercentError};

@@ -70,7 +70,7 @@ pub fn apply_settings(
         return Err(SessionError::Unsupported(unsupported.capability()));
     }
     for setting in settings {
-        session.apply(*setting)?;
+        session.apply(setting.clone())?;
     }
     let mut status = Status::default();
     settle(session, &mut status, timeout)?;

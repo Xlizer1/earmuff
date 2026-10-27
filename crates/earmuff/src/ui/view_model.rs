@@ -151,6 +151,7 @@ mod tests {
             name: format!("Headset {instance}"),
             vendor: "HyperX".into(),
             capabilities: vec![Capability::Battery],
+            equalizer: None,
         }
     }
 

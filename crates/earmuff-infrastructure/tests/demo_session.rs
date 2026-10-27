@@ -37,6 +37,7 @@ fn reads_the_whole_status() {
             auto_off: Some(AutoOff::minutes(20)),
             voice_prompts: Some(true),
             color: Some("Black/Red".into()),
+            ..Status::default()
         }
     );
 }

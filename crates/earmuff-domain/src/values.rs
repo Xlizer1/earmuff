@@ -103,6 +103,45 @@ impl fmt::Display for AutoOff {
     }
 }
 
+/// How hard the headset filters background noise from the mic
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum NoiseFilter {
+    Off,
+    Low,
+    High,
+}
+
+impl NoiseFilter {
+    pub const ALL: [NoiseFilter; 3] = [NoiseFilter::Off, NoiseFilter::Low, NoiseFilter::High];
+
+    /// 0, 1 or 2
+    pub fn level(self) -> u8 {
+        self as u8
+    }
+
+    pub fn from_level(level: u8) -> Option<Self> {
+        NoiseFilter::ALL.get(usize::from(level)).copied()
+    }
+}
+
+impl fmt::Display for NoiseFilter {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(match self {
+            NoiseFilter::Off => "off",
+            NoiseFilter::Low => "low",
+            NoiseFilter::High => "high",
+        })
+    }
+}
+
+impl FromStr for NoiseFilter {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        NoiseFilter::ALL.into_iter().find(|f| f.to_string() == s).ok_or_else(|| "use off, low or high".into())
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ChargeState {
     Discharging,
@@ -189,6 +228,16 @@ mod tests {
         assert_eq!(AutoOff::NEVER.to_string(), "never");
         assert_eq!(AutoOff::minutes(20).to_string(), "20 min");
         assert_eq!(AutoOff::minutes(20).get(), 20);
+    }
+
+    #[test]
+    fn noise_filter_levels_and_names() {
+        assert_eq!(NoiseFilter::High.level(), 2);
+        assert_eq!(NoiseFilter::from_level(1), Some(NoiseFilter::Low));
+        assert_eq!(NoiseFilter::from_level(3), None);
+        assert_eq!("off".parse(), Ok(NoiseFilter::Off));
+        assert!("max".parse::<NoiseFilter>().is_err());
+        assert_eq!(NoiseFilter::Low.to_string(), "low");
     }
 
     #[test]
