@@ -220,6 +220,11 @@ async fn scenario(
 
     // only the controls the headset has: the Cloud Alpha has no lights
     ensure(find::<adw::SwitchRow>(&window, "lights").is_err(), "no lights control on the Cloud Alpha")?;
+    // and what it is
+    let usb: adw::ActionRow = find(&window, "usb-id")?;
+    let connection: adw::ActionRow = find(&window, "connection")?;
+    ensure(usb.subtitle().as_deref() == Some("03f0:098d"), "shows the USB ID")?;
+    ensure(connection.subtitle().as_deref() == Some("Simulated (demo)"), "shows how it's connected")?;
 
     // the sidebar switches to the demo headset with every feature
     let list: gtk::ListBox = find(&window, "device-list")?;
@@ -247,6 +252,13 @@ async fn scenario(
     // turning the game/chat dial on the headset updates the window
     other.set_chatmix(20);
     until("the ChatMix reading", || chatmix.subtitle().as_deref() == Some("20 (more game)")).await?;
+    let meter: gtk::Scale = find(&window, "chatmix-meter")?;
+    ensure(meter.value() == 20.0, "the balance meter follows the dial")?;
+
+    // the headset plays its notification sound on request
+    let sound: gtk::Button = find(&window, "notification-sound")?;
+    sound.emit_clicked();
+    until("the notification sound", || other.played_sounds() == [0]).await?;
 
     // the headset forgets its settings while off; Earmuff puts them back when it's on
     other.set_powered(false);

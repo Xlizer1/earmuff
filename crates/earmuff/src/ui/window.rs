@@ -57,6 +57,9 @@ enum Row {
     Level(adw::ActionRow, gtk::Scale),
     Choice(adw::ComboRow),
     Info(adw::ActionRow),
+    /// A read-only meter, e.g. the ChatMix game/chat balance
+    Balance(adw::ActionRow, gtk::Scale),
+    Button(adw::ActionRow),
 }
 
 /// The tabs as currently built
@@ -738,7 +741,9 @@ impl Ui {
                     let row = self.build_row(control);
                     group.add(match &row {
                         Row::Switch(row) => row.upcast_ref::<gtk::Widget>(),
-                        Row::Level(row, _) | Row::Info(row) => row.upcast_ref(),
+                        Row::Level(row, _) | Row::Info(row) | Row::Balance(row, _) | Row::Button(row) => {
+                            row.upcast_ref()
+                        }
                         Row::Choice(row) => row.upcast_ref(),
                     });
                     rows.insert(control.control, row);
@@ -799,6 +804,39 @@ impl Ui {
                 Row::Choice(row)
             }
             Widget::Info(_) => Row::Info(adw::ActionRow::builder().name(control.name()).title(view.title).build()),
+            Widget::Balance(_) => {
+                // follows the dial on the headset; it can't be set from here
+                let meter = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 128.0, 1.0);
+                meter.set_widget_name("chatmix-meter");
+                meter.set_hexpand(true);
+                meter.set_draw_value(false);
+                meter.set_can_target(false);
+                meter.set_focusable(false);
+                meter.add_mark(0.0, gtk::PositionType::Bottom, Some("Game"));
+                meter.add_mark(64.0, gtk::PositionType::Bottom, None);
+                meter.add_mark(128.0, gtk::PositionType::Bottom, Some("Chat"));
+                meter.add_css_class("balance");
+                let row = adw::ActionRow::builder().name(control.name()).title(view.title).build();
+                row.add_suffix(&meter);
+                Row::Balance(row, meter)
+            }
+            Widget::Button(label) => {
+                let button = gtk::Button::builder()
+                    .label(*label)
+                    .name(control.name())
+                    .valign(gtk::Align::Center)
+                    .css_classes(["pill"])
+                    .build();
+                button.connect_clicked(move |_| {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.input(control, Input::Press);
+                    }
+                });
+                let row = adw::ActionRow::builder().name(format!("{}-row", control.name())).title(view.title).build();
+                row.add_suffix(&button);
+                row.set_activatable_widget(Some(&button));
+                Row::Button(row)
+            }
         }
     }
 
@@ -840,6 +878,11 @@ impl Ui {
                     }
                 }
                 (Some(Row::Info(row)), Widget::Info(text)) => row.set_subtitle(text),
+                (Some(Row::Balance(row, meter)), Widget::Balance(value)) => {
+                    row.set_subtitle(&value.map(crate::cli::chatmix_text).unwrap_or_default());
+                    meter.set_value(value.map_or(64.0, f64::from));
+                }
+                (Some(Row::Button(row)), Widget::Button(_)) => row.set_sensitive(control.sensitive),
                 _ => {}
             }
         }

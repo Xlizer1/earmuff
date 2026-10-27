@@ -2,9 +2,9 @@
 //! Plain Rust with no GTK, so all of the window's logic is unit-tested here.
 
 use earmuff_application::AppEvent;
-use earmuff_domain::{AutoOff, Capability, ChargeState, DeviceId, DeviceInfo, NoiseFilter, Percent, Setting, Status};
-
-use crate::cli::chatmix_text;
+use earmuff_domain::{
+    AutoOff, BackendKind, Capability, ChargeState, DeviceId, DeviceInfo, NoiseFilter, Percent, Setting, Status,
+};
 
 pub const LOOKING: &str = "Looking for a supported headset…";
 pub const WAITING: &str = "Waiting for the headset…";
@@ -102,6 +102,10 @@ pub enum Control {
     VoicePrompts,
     BtWhenPoweredOn,
     BtCallVolume,
+    NotificationSound,
+    Model,
+    UsbId,
+    Connection,
 }
 
 impl Control {
@@ -124,6 +128,10 @@ impl Control {
             Control::VoicePrompts => "voice-prompts",
             Control::BtWhenPoweredOn => "bluetooth-on-power",
             Control::BtCallVolume => "bluetooth-call-volume",
+            Control::NotificationSound => "notification-sound",
+            Control::Model => "model",
+            Control::UsbId => "usb-id",
+            Control::Connection => "connection",
         }
     }
 }
@@ -139,6 +147,10 @@ pub enum Widget {
     },
     /// Read-only text
     Info(String),
+    /// A read-only game/chat balance, 0 (game) to 128 (chat)
+    Balance(Option<u8>),
+    /// A button that does something once
+    Button(&'static str),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -276,6 +288,7 @@ pub enum Input {
     Level(u8),
     /// The index of the chosen option
     Choice(u32),
+    Press,
 }
 
 impl Model {
@@ -416,6 +429,7 @@ impl Model {
                 let presets = info.equalizer.as_ref().map_or(0, |eq| eq.presets.len());
                 (choice(i)? < presets).then_some(Setting::EqualizerPreset(u8::try_from(i).ok()?))?
             }
+            (Control::NotificationSound, Input::Press) => Setting::PlayNotificationSound(0),
             (Control::AutoOff, Input::Choice(i)) => {
                 let minutes = *auto_off_choices(status.auto_off.map(AutoOff::get)).get(choice(i)?)?;
                 Setting::AutoOff(AutoOff::minutes(minutes))
@@ -512,8 +526,13 @@ fn sections(info: &DeviceInfo, s: &Status) -> Vec<SectionView> {
             (has(Capability::EqualizerPreset) && !presets.is_empty()).then(|| {
                 choice(Control::EqualizerPreset, "Equalizer preset", presets, s.equalizer_preset.map(usize::from))
             }),
-            has(Capability::ChatMix)
-                .then(|| info_row(Control::ChatMix, "ChatMix", s.chatmix.map(chatmix_text).unwrap_or_default())),
+            has(Capability::ChatMix).then_some(ControlView {
+                control: Control::ChatMix,
+                title: "ChatMix",
+                subtitle: None,
+                widget: Widget::Balance(s.chatmix),
+                sensitive: true,
+            }),
             has(Capability::VolumeLimiter).then(|| {
                 switch(Control::VolumeLimiter, "Volume limiter", Some("Keeps loud sounds in check"), s.volume_limiter)
             }),
@@ -542,6 +561,13 @@ fn sections(info: &DeviceInfo, s: &Status) -> Vec<SectionView> {
             has(Capability::VoicePrompts).then(|| {
                 switch(Control::VoicePrompts, "Voice prompts", Some("Spoken alerts from the headset"), s.voice_prompts)
             }),
+            has(Capability::NotificationSound).then_some(ControlView {
+                control: Control::NotificationSound,
+                title: "Notification sound",
+                subtitle: None,
+                widget: Widget::Button("Play"),
+                sensitive: true,
+            }),
         ],
     );
 
@@ -553,6 +579,24 @@ fn sections(info: &DeviceInfo, s: &Status) -> Vec<SectionView> {
             has(Capability::BtWhenPoweredOn)
                 .then(|| switch(Control::BtWhenPoweredOn, "Turn on with the headset", None, s.bt_when_powered_on)),
             has(Capability::BtCallVolume).then(|| level(Control::BtCallVolume, "Call volume", s.bt_call_volume)),
+        ],
+    );
+
+    let connection = match info.id.backend {
+        BackendKind::Native => "Earmuff's own driver",
+        BackendKind::HeadsetControl => "Through HeadsetControl",
+        BackendKind::Demo => "Simulated (demo)",
+    };
+    let model =
+        if info.name.starts_with(&info.vendor) { info.name.clone() } else { format!("{} {}", info.vendor, info.name) };
+    add(
+        Tab::Power,
+        "About this headset",
+        None,
+        vec![
+            Some(info_row(Control::Model, "Model", model)),
+            Some(info_row(Control::UsbId, "USB ID", info.id.usb.to_string())),
+            Some(info_row(Control::Connection, "Connection", connection.into())),
         ],
     );
     sections
@@ -702,7 +746,7 @@ mod tests {
         let model = model_with(&CLOUD_ALPHA, vec![Event::Connected(true), Event::Sidetone(false)]);
         let view = model.view().unwrap();
         let titles: Vec<&str> = view.sections.iter().map(|s| s.title).collect();
-        assert_eq!(titles, ["Microphone", "Mic monitoring", "Power and sounds"]);
+        assert_eq!(titles, ["Microphone", "Mic monitoring", "Power and sounds", "About this headset"]);
         let controls: Vec<Control> = view.layout().iter().map(|(c, _)| *c).collect();
         assert_eq!(
             controls,
@@ -712,9 +756,15 @@ mod tests {
                 Control::Sidetone,
                 Control::SidetoneLevel,
                 Control::AutoOff,
-                Control::VoicePrompts
+                Control::VoicePrompts,
+                Control::Model,
+                Control::UsbId,
+                Control::Connection
             ]
         );
+        assert_eq!(view.control(Control::Model).unwrap().widget, Widget::Info("HyperX Headset a".into()));
+        assert_eq!(view.control(Control::UsbId).unwrap().widget, Widget::Info("03f0:098d".into()));
+        assert_eq!(view.control(Control::Connection).unwrap().widget, Widget::Info("Simulated (demo)".into()));
         assert!(
             !view.control(Control::SidetoneLevel).unwrap().sensitive,
             "level is greyed out while monitoring is off"
@@ -740,7 +790,7 @@ mod tests {
         );
         let view = model.view().unwrap();
         assert!(!view.has_battery);
-        assert_eq!(view.control(Control::ChatMix).unwrap().widget, Widget::Info("30 (more game)".into()));
+        assert_eq!(view.control(Control::ChatMix).unwrap().widget, Widget::Balance(Some(30)));
         assert_eq!(
             view.control(Control::NoiseFilter).unwrap().widget,
             Widget::Choice { options: vec!["Off".into(), "Low".into(), "High".into()], selected: Some(2) }
@@ -810,6 +860,7 @@ mod tests {
         // the auto-off list includes the headset's own 45 minutes
         assert_eq!(model.setting(Control::AutoOff, Input::Choice(4)), Some(Setting::AutoOff(AutoOff::minutes(45))));
         assert_eq!(model.setting(Control::ChatMix, Input::Switch(true)), None);
+        assert_eq!(model.setting(Control::NotificationSound, Input::Press), Some(Setting::PlayNotificationSound(0)));
     }
 
     #[test]
