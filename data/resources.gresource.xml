@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/io/github/xlizer1/Earmuff">
+    <file preprocess="xml-stripblanks">icons/scalable/actions/earmuff-headset-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/apps/io.github.xlizer1.Earmuff.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/apps/io.github.xlizer1.Earmuff-symbolic.svg</file>
+  </gresource>
+</gresources>

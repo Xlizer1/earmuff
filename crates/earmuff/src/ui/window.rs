@@ -93,12 +93,12 @@ impl Ui {
 
         let missing_page = adw::StatusPage::builder()
             .name("missing-page")
-            .icon_name("audio-headset-symbolic")
+            .icon_name("earmuff-headset-symbolic")
             .title("Plug in your headset's USB dongle")
             .build();
         let off_page = adw::StatusPage::builder()
             .name("off-page")
-            .icon_name("audio-headset-symbolic")
+            .icon_name("earmuff-headset-symbolic")
             .title("Headset is off")
             .description("Turn it on with the power button.")
             .build();

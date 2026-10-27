@@ -26,9 +26,12 @@ install: build
 	install -Dm755 target/release/earmuff $(PREFIX)/bin/earmuff
 	install -d $(PREFIX)/share/applications
 	sed 's|^Exec=earmuff|Exec=$(PREFIX)/bin/earmuff|' data/$(APP_ID).desktop > $(PREFIX)/share/applications/$(APP_ID).desktop
+	install -Dm644 data/icons/scalable/apps/$(APP_ID).svg $(PREFIX)/share/icons/hicolor/scalable/apps/$(APP_ID).svg
+	install -Dm644 data/icons/scalable/apps/$(APP_ID)-symbolic.svg $(PREFIX)/share/icons/hicolor/symbolic/apps/$(APP_ID)-symbolic.svg
 
 uninstall:
 	rm -f $(PREFIX)/bin/earmuff $(PREFIX)/share/applications/$(APP_ID).desktop
+	rm -f $(PREFIX)/share/icons/hicolor/scalable/apps/$(APP_ID).svg $(PREFIX)/share/icons/hicolor/symbolic/apps/$(APP_ID)-symbolic.svg
 
 # Not needed when HeadsetControl is installed: its udev rule covers the same dongles
 install-udev:

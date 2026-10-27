@@ -8,8 +8,17 @@ use std::sync::Arc;
 
 use adw::prelude::*;
 use earmuff_application::{Backend, ManagerOptions};
+use gtk::gio;
 
 pub const APP_ID: &str = "io.github.xlizer1.Earmuff";
+/// Where the embedded icons and stylesheet live
+pub const RESOURCE_PATH: &str = "/io/github/xlizer1/Earmuff";
+
+/// Makes the icons and stylesheet compiled into the binary available
+pub fn register_resources() {
+    static REGISTER: std::sync::Once = std::sync::Once::new();
+    REGISTER.call_once(|| gio::resources_register_include!("earmuff.gresource").expect("embedded resources are valid"));
+}
 
 #[derive(Clone, Debug)]
 pub struct UiOptions {
@@ -31,7 +40,9 @@ impl Default for UiOptions {
 /// Earmuff's window back.
 pub fn application(backends: Vec<Arc<dyn Backend>>, options: UiOptions) -> adw::Application {
     let app_id = if options.demo { format!("{}.Demo", options.app_id) } else { options.app_id.clone() };
-    let app = adw::Application::builder().application_id(app_id).build();
+    register_resources();
+    // GTK then finds the icons under RESOURCE_PATH/icons, whatever the app ID
+    let app = adw::Application::builder().application_id(app_id).resource_base_path(RESOURCE_PATH).build();
     app.connect_activate(move |app| match app.active_window() {
         Some(window) => window.present(),
         None => window::open(app, backends.clone(), &options),
@@ -42,4 +53,23 @@ pub fn application(backends: Vec<Arc<dyn Backend>>, options: UiOptions) -> adw::
 pub fn run(backends: Vec<Arc<dyn Backend>>, options: UiOptions) -> ExitCode {
     // clap already parsed the command line, so GTK gets no arguments
     application(backends, options).run_with_args::<&str>(&[]).into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn icons_are_compiled_in() {
+        register_resources();
+        for icon in [
+            "icons/scalable/apps/io.github.xlizer1.Earmuff.svg",
+            "icons/scalable/apps/io.github.xlizer1.Earmuff-symbolic.svg",
+            "icons/scalable/actions/earmuff-headset-symbolic.svg",
+        ] {
+            let path = format!("{RESOURCE_PATH}/{icon}");
+            let data = gio::resources_lookup_data(&path, gio::ResourceLookupFlags::NONE).expect("compiled in");
+            assert!(data.windows(4).any(|w| w == b"<svg"), "{icon} is an SVG");
+        }
+    }
 }
