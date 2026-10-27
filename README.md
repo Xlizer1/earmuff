@@ -65,8 +65,8 @@ Measured on this headset (2026-10-27):
 - Bytes 4-5 of the battery answer look like the battery voltage in millivolts
   (0x103a = 4154, then 4150 a few minutes later). Not confirmed.
 
-Command bytes come from [HeadsetControl](https://github.com/Sapd/HeadsetControl) and
-[HyperHeadset](https://github.com/LennardKittner/HyperHeadset), both MIT licensed.
+Command bytes come from [HeadsetControl](https://github.com/Sapd/HeadsetControl) (GPL-3.0) and
+[HyperHeadset](https://github.com/LennardKittner/HyperHeadset) (MIT).
 
 ## Code
 

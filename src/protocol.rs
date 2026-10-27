@@ -5,7 +5,7 @@
 //! each GET with the same command byte, and sends the `EVT_*` reports on its own
 //! when something changes (mute button, battery, power).
 //!
-//! Command bytes come from HeadsetControl and HyperHeadset (both MIT licensed).
+//! Command bytes come from HeadsetControl (GPL-3.0) and HyperHeadset (MIT).
 //! The sidetone level encoding and the value ranges were measured on the headset.
 
 use std::fmt;
