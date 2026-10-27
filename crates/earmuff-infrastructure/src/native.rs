@@ -86,15 +86,25 @@ fn disconnected(error: io::Error) -> SessionError {
 ///
 /// Reports go out one at a time: the next one waits until the headset answered the
 /// last one, or the codec's reply timeout passed. The HyperX dongle drops commands
-/// sent back to back.
+/// sent back to back, and drops ours when another program talks to it at the same
+/// moment, so an unanswered report is sent again, up to [`SEND_ATTEMPTS`] times.
 pub struct NativeSession<T: Transport> {
     info: DeviceInfo,
     codec: &'static dyn Codec,
     transport: T,
     queue: VecDeque<Exchange>,
-    /// The exchange waiting for an answer, and until when
-    waiting: Option<(Exchange, Instant)>,
+    waiting: Option<Waiting>,
     raw: bool,
+}
+
+/// How many times a report is sent before giving up on an answer
+pub const SEND_ATTEMPTS: u8 = 3;
+
+/// The exchange waiting for an answer
+struct Waiting {
+    exchange: Exchange,
+    deadline: Instant,
+    attempts: u8,
 }
 
 impl<T: Transport> NativeSession<T> {
@@ -102,10 +112,17 @@ impl<T: Transport> NativeSession<T> {
         NativeSession { info, codec, transport, queue: VecDeque::new(), waiting: None, raw: false }
     }
 
-    /// Sends the next report once the last one was answered or timed out
+    /// Sends the next report once the last one was answered, or sends an unanswered
+    /// one again; gives up on it after SEND_ATTEMPTS
     fn pump(&mut self) -> Result<(), SessionError> {
-        if let Some((_, deadline)) = &self.waiting {
-            if Instant::now() < *deadline {
+        if let Some(waiting) = &mut self.waiting {
+            if Instant::now() < waiting.deadline {
+                return Ok(());
+            }
+            if waiting.attempts < SEND_ATTEMPTS {
+                self.transport.send(&waiting.exchange.report).map_err(disconnected)?;
+                waiting.attempts += 1;
+                waiting.deadline = Instant::now() + self.codec.reply_timeout();
                 return Ok(());
             }
             self.waiting = None;
@@ -113,7 +130,8 @@ impl<T: Transport> NativeSession<T> {
         while let Some(exchange) = self.queue.pop_front() {
             self.transport.send(&exchange.report).map_err(disconnected)?;
             if exchange.reply_prefix.is_some() {
-                self.waiting = Some((exchange, Instant::now() + self.codec.reply_timeout()));
+                let deadline = Instant::now() + self.codec.reply_timeout();
+                self.waiting = Some(Waiting { exchange, deadline, attempts: 1 });
                 break;
             }
         }
@@ -123,7 +141,7 @@ impl<T: Transport> NativeSession<T> {
     /// Handles every report waiting on the transport
     fn receive_all(&mut self, events: &mut Vec<Event>) -> Result<(), SessionError> {
         while let Some(report) = self.transport.receive().map_err(disconnected)? {
-            if self.waiting.as_ref().is_some_and(|(exchange, _)| exchange.answered_by(&report)) {
+            if self.waiting.as_ref().is_some_and(|waiting| waiting.exchange.answered_by(&report)) {
                 self.waiting = None;
             }
             if let Some(event) = self.codec.decode(&report) {
@@ -165,7 +183,7 @@ impl<T: Transport> Session for NativeSession<T> {
             if !events.is_empty() || now >= end {
                 return Ok(events);
             }
-            let until = self.waiting.as_ref().map_or(end, |(_, deadline)| (*deadline).min(end));
+            let until = self.waiting.as_ref().map_or(end, |waiting| waiting.deadline.min(end));
             match self.transport.wait(until.saturating_duration_since(now)).map_err(disconnected)? {
                 Wakeup::Woken => return Ok(events),
                 Wakeup::Ready | Wakeup::TimedOut => {}
@@ -203,6 +221,8 @@ mod tests {
         sent: Arc<Mutex<Vec<Vec<u8>>>>,
         inbox: Arc<Mutex<VecDeque<Vec<u8>>>>,
         answers: Arc<Mutex<Vec<Answer>>>,
+        /// How many of the next reports go unanswered, like on a busy dongle
+        drops: Arc<Mutex<usize>>,
     }
 
     impl Scripted {
@@ -218,6 +238,11 @@ mod tests {
     impl Transport for Scripted {
         fn send(&mut self, report: &[u8]) -> io::Result<()> {
             self.sent.lock().unwrap().push(report.to_vec());
+            let mut drops = self.drops.lock().unwrap();
+            if *drops > 0 {
+                *drops -= 1;
+                return Ok(());
+            }
             let answers = self.answers.lock().unwrap();
             if let Some((_, reply)) = answers.iter().find(|(command, _)| *command == report[2]) {
                 self.inbox.lock().unwrap().push_back(reply.clone());
@@ -270,16 +295,36 @@ mod tests {
     }
 
     #[test]
-    fn moves_on_after_the_reply_timeout() {
+    fn sends_an_unanswered_report_again_then_moves_on() {
         let transport = Scripted::default(); // never answers
         let mut session = session(transport.clone());
         session.query(Query::Battery).unwrap();
         let start = Instant::now();
-        while transport.sent_commands().len() < 2 {
+        while transport.sent_commands().len() < 4 {
             session.poll(Duration::from_millis(50)).unwrap();
-            assert!(start.elapsed() < Duration::from_secs(2), "stuck on an unanswered report");
+            assert!(start.elapsed() < Duration::from_secs(5), "stuck on an unanswered report");
         }
-        assert!(start.elapsed() >= CloudAlphaWireless.reply_timeout());
+        let battery = cmd::GET_BATTERY;
+        assert_eq!(transport.sent_commands(), [battery, battery, battery, cmd::GET_CHARGING]);
+        assert!(start.elapsed() >= CloudAlphaWireless.reply_timeout() * u32::from(SEND_ATTEMPTS));
+    }
+
+    #[test]
+    fn a_report_the_dongle_dropped_still_gets_answered() {
+        let transport = Scripted::default();
+        transport.answer(cmd::GET_BATTERY, packet(cmd::GET_BATTERY, &[80]));
+        transport.answer(cmd::GET_CHARGING, packet(cmd::GET_CHARGING, &[0]));
+        *transport.drops.lock().unwrap() = 1;
+        let mut session = session(transport.clone());
+        session.query(Query::Battery).unwrap();
+        let mut events = Vec::new();
+        let start = Instant::now();
+        while !session.is_idle() {
+            events.extend(session.poll(Duration::from_millis(50)).unwrap());
+            assert!(start.elapsed() < Duration::from_secs(5), "never answered");
+        }
+        assert!(events.contains(&Event::Battery(Percent::saturating(80))));
+        assert_eq!(transport.sent_commands(), [cmd::GET_BATTERY, cmd::GET_BATTERY, cmd::GET_CHARGING]);
     }
 
     #[test]
