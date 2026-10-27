@@ -148,6 +148,9 @@ fn unplugged_headsets_are_not_discovered() {
     let device = backend.discover().unwrap().remove(0);
     assert_eq!(device.name, "Cloud Alpha Wireless (demo)");
     backend.headsets()[0].unplug();
-    assert_eq!(backend.discover().unwrap(), []);
+    let names: Vec<String> = backend.discover().unwrap().into_iter().map(|d| d.name).collect();
+    assert_eq!(names, ["Earmuff Demo Headset"]);
     assert!(backend.open(&device).is_err());
+    backend.full_headset().unplug();
+    assert_eq!(backend.discover().unwrap(), []);
 }

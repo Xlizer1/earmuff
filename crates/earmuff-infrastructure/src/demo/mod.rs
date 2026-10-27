@@ -1,5 +1,6 @@
 //! Simulated headsets: the tests run against them, and anyone can try Earmuff without one.
 
+mod full;
 mod simulator;
 
 use std::io;
@@ -13,6 +14,7 @@ use earmuff_protocols::hyperx::CloudAlphaWireless;
 use crate::hidraw::{Transport, Wakeup};
 use crate::native::{NativeSession, device_info};
 
+pub use full::{FULL_DEMO_USB, FullHeadset, FullSession};
 pub use simulator::CloudAlphaSimulator;
 
 #[derive(Debug)]
@@ -143,21 +145,27 @@ impl Transport for SimTransport {
     }
 }
 
-/// Offers simulated headsets as devices, through the same native driver real ones use
+/// Offers simulated headsets as devices: a Cloud Alpha Wireless driven through the
+/// same native driver as the real one, and a headset with every feature
 #[derive(Debug)]
 pub struct DemoBackend {
     headsets: Vec<DemoHeadset>,
+    full: FullHeadset,
 }
 
 impl DemoBackend {
-    /// One simulated Cloud Alpha Wireless, plugged in
     pub fn new() -> Self {
-        DemoBackend { headsets: vec![DemoHeadset::new("demo-1")] }
+        DemoBackend { headsets: vec![DemoHeadset::new("demo-1")], full: FullHeadset::new("demo-2") }
     }
 
-    /// Handles to control the simulated headsets
+    /// Handles to control the simulated Cloud Alpha Wireless headsets
     pub fn headsets(&self) -> &[DemoHeadset] {
         &self.headsets
+    }
+
+    /// Handle to control the headset with every feature
+    pub fn full_headset(&self) -> &FullHeadset {
+        &self.full
     }
 }
 
@@ -173,10 +181,18 @@ impl Backend for DemoBackend {
     }
 
     fn discover(&self) -> Result<Vec<DeviceInfo>, BackendError> {
-        Ok(self.headsets.iter().filter(|h| h.is_plugged()).map(DemoHeadset::info).collect())
+        let mut devices: Vec<DeviceInfo> =
+            self.headsets.iter().filter(|h| h.is_plugged()).map(DemoHeadset::info).collect();
+        if self.full.is_plugged() {
+            devices.push(self.full.info());
+        }
+        Ok(devices)
     }
 
     fn open(&self, device: &DeviceInfo) -> Result<Box<dyn Session>, BackendError> {
+        if device.id.instance == self.full.instance() && self.full.is_plugged() {
+            return Ok(Box::new(self.full.session()));
+        }
         let headset = self
             .headsets
             .iter()

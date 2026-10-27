@@ -8,19 +8,20 @@ use std::sync::Arc;
 
 use adw::prelude::*;
 use earmuff_application::Backend;
-use earmuff_infrastructure::demo::{DemoBackend, DemoHeadset};
+use earmuff_infrastructure::demo::{DemoBackend, DemoHeadset, FullHeadset};
 use support::{Outcome, ensure, find, page, run_app, until, window};
 
 fn main() -> ExitCode {
     support::isolated("window", || {
         let demo = DemoBackend::new();
         let headset = demo.headsets()[0].clone();
+        let other = demo.full_headset().clone();
         let backends: Vec<Arc<dyn Backend>> = vec![Arc::new(demo)];
-        run_app(backends, false, move |app| scenario(app, headset))
+        run_app(backends, false, move |app| scenario(app, headset, other))
     })
 }
 
-async fn scenario(app: adw::Application, headset: DemoHeadset) -> Outcome {
+async fn scenario(app: adw::Application, headset: DemoHeadset, other: FullHeadset) -> Outcome {
     let window = window(&app).await?;
     let title: adw::WindowTitle = find(&window, "title")?;
     let battery: gtk::Label = find(&window, "battery-label")?;
@@ -80,11 +81,15 @@ async fn scenario(app: adw::Application, headset: DemoHeadset) -> Outcome {
     until("the settings page again", || page(&window) == "settings").await?;
     until("the auto-off set while it was off", || selected_text(&auto_off) == "45 minutes").await?;
 
-    // the dongle is unplugged and plugged back in
+    // the dongle is unplugged: the window moves on to the other headset
     headset.unplug();
+    until("the other headset", || title.title() == "Earmuff Demo Headset").await?;
+    // with both unplugged it asks for a dongle
+    other.unplug();
     until("the plug-in page", || page(&window) == "missing").await?;
     ensure(missing.description().as_deref() == Some(earmuff::ui::view_model::LOOKING), "says it is looking")?;
     headset.plug();
+    other.plug();
     until("the settings page after replugging", || page(&window) == "settings").await?;
 
     // without a tray icon, closing the window quits
