@@ -177,10 +177,9 @@ fn monitor_streams_events_and_raw_reports() {
 #[test]
 fn help_and_version() {
     let help = stdout(&earmuff(&["--help"]));
-    for command in ["list", "status", "set", "play-sound", "waybar", "monitor", "--device"] {
+    for command in ["list", "status", "set", "play-sound", "waybar", "monitor", "--device", "--demo"] {
         assert!(help.contains(command), "help mentions {command}");
     }
-    assert!(!help.contains("--demo"), "the demo flag stays hidden");
     let set_help = stdout(&earmuff(&["set", "--help"]));
     for setting in ["sidetone", "eq-preset", "noise-filter", "bluetooth-call-volume"] {
         assert!(set_help.contains(setting), "set help mentions {setting}");

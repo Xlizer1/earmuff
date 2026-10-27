@@ -31,8 +31,8 @@ pub struct Cli {
     #[arg(short, long, global = true, value_name = "VID:PID")]
     pub device: Option<UsbId>,
 
-    /// Use simulated headsets instead of real ones
-    #[arg(long, global = true, hide = true)]
+    /// Try Earmuff with simulated headsets instead of real ones
+    #[arg(long, global = true)]
     pub demo: bool,
 }
 
