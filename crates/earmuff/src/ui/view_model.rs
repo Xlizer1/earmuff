@@ -2,17 +2,24 @@
 //! Plain Rust with no GTK, so all of the window's logic is unit-tested here.
 
 use earmuff_application::AppEvent;
-use earmuff_domain::{ChargeState, DeviceInfo, Status};
+use earmuff_domain::{AutoOff, Capability, ChargeState, DeviceId, DeviceInfo, NoiseFilter, Percent, Setting, Status};
+
+use crate::cli::chatmix_text;
 
 pub const LOOKING: &str = "Looking for a supported headset…";
 pub const WAITING: &str = "Waiting for the headset…";
 pub const AUTO_OFF_MINUTES: [u8; 6] = [0, 10, 20, 30, 60, 90];
+const MUTE_LED_LEVELS: [&str; 4] = ["Off", "Dim", "Medium", "Bright"];
+const NOISE_FILTERS: [&str; 3] = ["Off", "Low", "High"];
 
-/// The headsets the device manager reported, and what's stopping one from working
+/// The headsets the device manager reported, which one the window shows, and
+/// what's stopping one from working
 #[derive(Debug, Default)]
 pub struct Model {
     devices: Vec<(DeviceInfo, Status)>,
+    selected: Option<DeviceId>,
     problem: Option<String>,
+    failure: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -26,22 +33,119 @@ pub enum Page {
     Settings,
 }
 
+/// Something the user can see or change on the settings page
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Control {
+    Mute,
+    MicAttached,
+    MicVolume,
+    NoiseFilter,
+    RotateToMute,
+    MuteLed,
+    Sidetone,
+    SidetoneLevel,
+    EqualizerPreset,
+    ChatMix,
+    VolumeLimiter,
+    Lights,
+    AutoOff,
+    VoicePrompts,
+    BtWhenPoweredOn,
+    BtCallVolume,
+}
+
+impl Control {
+    /// The widget's name, which the end-to-end tests look for
+    pub fn name(self) -> &'static str {
+        match self {
+            Control::Mute => "mute",
+            Control::MicAttached => "mic",
+            Control::MicVolume => "mic-volume",
+            Control::NoiseFilter => "noise-filter",
+            Control::RotateToMute => "rotate-to-mute",
+            Control::MuteLed => "mute-led",
+            Control::Sidetone => "sidetone",
+            Control::SidetoneLevel => "level",
+            Control::EqualizerPreset => "eq-preset",
+            Control::ChatMix => "chatmix",
+            Control::VolumeLimiter => "volume-limiter",
+            Control::Lights => "lights",
+            Control::AutoOff => "auto-off",
+            Control::VoicePrompts => "voice-prompts",
+            Control::BtWhenPoweredOn => "bluetooth-on-power",
+            Control::BtCallVolume => "bluetooth-call-volume",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Widget {
+    Switch(bool),
+    /// A slider from 0 to 100%
+    Level(Option<u8>),
+    Choice {
+        options: Vec<String>,
+        selected: Option<u32>,
+    },
+    /// Read-only text
+    Info(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ControlView {
+    pub control: Control,
+    pub title: &'static str,
+    pub subtitle: Option<&'static str>,
+    pub widget: Widget,
+    pub sensitive: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SectionView {
+    pub title: &'static str,
+    pub description: Option<&'static str>,
+    pub controls: Vec<ControlView>,
+}
+
 /// Everything the settings page shows, ready for the widgets
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeviceView {
     pub title: String,
     pub subtitle: String,
+    pub has_battery: bool,
     /// Battery percentage for the level bar
     pub battery: Option<u8>,
     pub battery_text: String,
     pub charge_text: String,
-    pub muted: bool,
-    pub mic_text: String,
-    pub sidetone: bool,
-    /// Mic monitoring level in percent
-    pub level: Option<u8>,
-    pub auto_off: Option<u8>,
-    pub voice_prompts: bool,
+    pub sections: Vec<SectionView>,
+}
+
+impl DeviceView {
+    /// The rows and their choices; the window rebuilds its rows when this changes
+    pub fn layout(&self) -> Vec<(Control, Vec<String>)> {
+        self.sections
+            .iter()
+            .flat_map(|section| &section.controls)
+            .map(|c| match &c.widget {
+                Widget::Choice { options, .. } => (c.control, options.clone()),
+                _ => (c.control, Vec::new()),
+            })
+            .collect()
+    }
+
+    pub fn control(&self, control: Control) -> Option<&ControlView> {
+        self.sections.iter().flat_map(|section| &section.controls).find(|c| c.control == control)
+    }
+}
+
+/// What the user did to a control
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Input {
+    Switch(bool),
+    /// 0 to 100
+    Level(u8),
+    /// The index of the chosen option
+    Choice(u32),
 }
 
 impl Model {
@@ -61,8 +165,11 @@ impl Model {
                 self.devices.retain(|(info, _)| info.id != *id);
                 self.devices.len() != before
             }
-            // shown as a toast by the window, nothing to redraw
-            AppEvent::Failed(..) => false,
+            // redraw, so the control the user changed shows the headset's value again
+            AppEvent::Failed(_, reason) => {
+                self.failure = Some(reason.clone());
+                true
+            }
             AppEvent::Problem(problem) => {
                 let changed = self.problem != *problem;
                 self.problem = problem.clone();
@@ -71,9 +178,28 @@ impl Model {
         }
     }
 
-    /// The headset the window shows: the first one found
+    /// The last setting a headset refused, once
+    pub fn take_failure(&mut self) -> Option<String> {
+        self.failure.take()
+    }
+
+    pub fn devices(&self) -> impl Iterator<Item = &DeviceInfo> {
+        self.devices.iter().map(|(info, _)| info)
+    }
+
+    /// Shows another headset; returns false if it isn't connected
+    pub fn select(&mut self, id: &DeviceId) -> bool {
+        let known = self.devices.iter().any(|(info, _)| info.id == *id);
+        if known {
+            self.selected = Some(id.clone());
+        }
+        known
+    }
+
+    /// The headset the window shows: the one picked, or else the first one found
     pub fn current(&self) -> Option<&(DeviceInfo, Status)> {
-        self.devices.first()
+        let picked = self.selected.as_ref().and_then(|id| self.devices.iter().find(|(info, _)| info.id == *id));
+        picked.or(self.devices.first())
     }
 
     pub fn page(&self) -> Page {
@@ -96,6 +222,7 @@ impl Model {
         Some(DeviceView {
             title: info.name.clone(),
             subtitle: s.color.clone().unwrap_or_default(),
+            has_battery: info.supports(Capability::Battery),
             battery: s.battery.map(|b| b.get()),
             battery_text: s.battery.map(|b| b.to_string()).unwrap_or_default(),
             charge_text: match s.charge {
@@ -105,19 +232,163 @@ impl Model {
                 Some(ChargeState::Unknown) | None => "",
             }
             .into(),
-            muted: s.mic_muted.unwrap_or(false),
-            mic_text: match s.mic_attached {
-                Some(true) => "Attached",
-                Some(false) => "Not attached",
-                None => "",
-            }
-            .into(),
-            sidetone: s.sidetone.unwrap_or(false),
-            level: s.sidetone_level.map(|l| l.get()),
-            auto_off: s.auto_off.map(|a| a.get()),
-            voice_prompts: s.voice_prompts.unwrap_or(false),
+            sections: sections(info, s),
         })
     }
+
+    /// The setting a change to `control` asks for, on the headset the window shows
+    pub fn setting(&self, control: Control, input: Input) -> Option<Setting> {
+        let (info, status) = self.current()?;
+        let choice = |index: u32| usize::try_from(index).ok();
+        Some(match (control, input) {
+            (Control::Mute, Input::Switch(on)) => Setting::MicMuted(on),
+            (Control::RotateToMute, Input::Switch(on)) => Setting::RotateToMute(on),
+            (Control::Sidetone, Input::Switch(on)) => Setting::Sidetone(on),
+            (Control::VolumeLimiter, Input::Switch(on)) => Setting::VolumeLimiter(on),
+            (Control::Lights, Input::Switch(on)) => Setting::Lights(on),
+            (Control::VoicePrompts, Input::Switch(on)) => Setting::VoicePrompts(on),
+            (Control::BtWhenPoweredOn, Input::Switch(on)) => Setting::BtWhenPoweredOn(on),
+            (Control::MicVolume, Input::Level(level)) => Setting::MicVolume(Percent::saturating(level.into())),
+            (Control::SidetoneLevel, Input::Level(level)) => Setting::SidetoneLevel(Percent::saturating(level.into())),
+            (Control::BtCallVolume, Input::Level(level)) => Setting::BtCallVolume(Percent::saturating(level.into())),
+            (Control::NoiseFilter, Input::Choice(i)) => Setting::NoiseFilter(*NoiseFilter::ALL.get(choice(i)?)?),
+            (Control::MuteLed, Input::Choice(i)) if (i as usize) < MUTE_LED_LEVELS.len() => {
+                Setting::MicMuteLedBrightness(u8::try_from(i).ok()?)
+            }
+            (Control::EqualizerPreset, Input::Choice(i)) => {
+                let presets = info.equalizer.as_ref().map_or(0, |eq| eq.presets.len());
+                (choice(i)? < presets).then_some(Setting::EqualizerPreset(u8::try_from(i).ok()?))?
+            }
+            (Control::AutoOff, Input::Choice(i)) => {
+                let minutes = *auto_off_choices(status.auto_off.map(AutoOff::get)).get(choice(i)?)?;
+                Setting::AutoOff(AutoOff::minutes(minutes))
+            }
+            _ => return None,
+        })
+    }
+}
+
+fn switch(control: Control, title: &'static str, subtitle: Option<&'static str>, value: Option<bool>) -> ControlView {
+    ControlView { control, title, subtitle, widget: Widget::Switch(value.unwrap_or(false)), sensitive: true }
+}
+
+fn level(control: Control, title: &'static str, value: Option<Percent>) -> ControlView {
+    ControlView { control, title, subtitle: None, widget: Widget::Level(value.map(Percent::get)), sensitive: true }
+}
+
+fn choice(control: Control, title: &'static str, options: Vec<String>, selected: Option<usize>) -> ControlView {
+    let selected = selected.and_then(|i| u32::try_from(i).ok());
+    ControlView { control, title, subtitle: None, widget: Widget::Choice { options, selected }, sensitive: true }
+}
+
+fn info_row(control: Control, title: &'static str, text: String) -> ControlView {
+    ControlView { control, title, subtitle: None, widget: Widget::Info(text), sensitive: true }
+}
+
+/// The settings page's groups, with only the controls this headset has
+fn sections(info: &DeviceInfo, s: &Status) -> Vec<SectionView> {
+    let has = |capability| info.supports(capability);
+    let mut sections = Vec::new();
+    let mut add = |title, description, controls: Vec<Option<ControlView>>| {
+        let controls: Vec<ControlView> = controls.into_iter().flatten().collect();
+        if !controls.is_empty() {
+            sections.push(SectionView { title, description, controls });
+        }
+    };
+
+    add(
+        "Microphone",
+        None,
+        vec![
+            has(Capability::MicMute)
+                .then(|| switch(Control::Mute, "Mute", Some("Same as the mute button on the headset"), s.mic_muted)),
+            has(Capability::MicAttached).then(|| {
+                let text = match s.mic_attached {
+                    Some(true) => "Attached",
+                    Some(false) => "Not attached",
+                    None => "",
+                };
+                info_row(Control::MicAttached, "Mic boom", text.into())
+            }),
+            has(Capability::MicVolume).then(|| level(Control::MicVolume, "Volume", s.mic_volume)),
+            has(Capability::NoiseFilter).then(|| {
+                let options = NOISE_FILTERS.map(String::from).to_vec();
+                choice(Control::NoiseFilter, "Noise filter", options, s.noise_filter.map(|f| usize::from(f.level())))
+            }),
+            has(Capability::RotateToMute).then(|| {
+                switch(
+                    Control::RotateToMute,
+                    "Mute when raised",
+                    Some("Mutes when you flip the mic up"),
+                    s.rotate_to_mute,
+                )
+            }),
+            has(Capability::MicMuteLedBrightness).then(|| {
+                let options = MUTE_LED_LEVELS.map(String::from).to_vec();
+                choice(Control::MuteLed, "Mute light", options, s.mic_mute_led_brightness.map(usize::from))
+            }),
+        ],
+    );
+
+    let sidetone_on = s.sidetone.unwrap_or(false);
+    add(
+        "Mic monitoring",
+        Some("Hear your own voice in the headset while you talk"),
+        vec![
+            has(Capability::Sidetone).then(|| switch(Control::Sidetone, "Mic monitoring", None, s.sidetone)),
+            has(Capability::SidetoneLevel).then(|| ControlView {
+                sensitive: sidetone_on || !has(Capability::Sidetone),
+                ..level(Control::SidetoneLevel, "Level", s.sidetone_level)
+            }),
+        ],
+    );
+
+    let presets: Vec<String> =
+        info.equalizer.as_ref().map(|eq| eq.presets.iter().map(|p| p.name.clone()).collect()).unwrap_or_default();
+    add(
+        "Sound",
+        None,
+        vec![
+            (has(Capability::EqualizerPreset) && !presets.is_empty()).then(|| {
+                choice(Control::EqualizerPreset, "Equalizer preset", presets, s.equalizer_preset.map(usize::from))
+            }),
+            has(Capability::ChatMix)
+                .then(|| info_row(Control::ChatMix, "ChatMix", s.chatmix.map(chatmix_text).unwrap_or_default())),
+            has(Capability::VolumeLimiter).then(|| {
+                switch(Control::VolumeLimiter, "Volume limiter", Some("Keeps loud sounds in check"), s.volume_limiter)
+            }),
+        ],
+    );
+
+    add("Lighting", None, vec![has(Capability::Lights).then(|| switch(Control::Lights, "Lights", None, s.lights))]);
+
+    add(
+        "Power and sounds",
+        None,
+        vec![
+            has(Capability::AutoOff).then(|| {
+                let current = s.auto_off.map(AutoOff::get);
+                let choices = auto_off_choices(current);
+                let options = choices.iter().map(|m| minutes_text(*m)).collect();
+                let selected = current.and_then(|minutes| choices.iter().position(|m| *m == minutes));
+                choice(Control::AutoOff, "Turn off when not in use", options, selected)
+            }),
+            has(Capability::VoicePrompts).then(|| {
+                switch(Control::VoicePrompts, "Voice prompts", Some("Spoken alerts from the headset"), s.voice_prompts)
+            }),
+        ],
+    );
+
+    add(
+        "Bluetooth",
+        None,
+        vec![
+            has(Capability::BtWhenPoweredOn)
+                .then(|| switch(Control::BtWhenPoweredOn, "Turn on with the headset", None, s.bt_when_powered_on)),
+            has(Capability::BtCallVolume).then(|| level(Control::BtCallVolume, "Call volume", s.bt_call_volume)),
+        ],
+    );
+    sections
 }
 
 pub fn minutes_text(minutes: u8) -> String {
@@ -145,20 +416,54 @@ pub fn auto_off_choices(current: Option<u8>) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use earmuff_domain::{AutoOff, BackendKind, Capability, DeviceId, Event, Percent, UsbId};
+    use earmuff_domain::{BackendKind, EqPreset, EqualizerSpec, Event, Gain, UsbId};
 
-    fn info(instance: &str) -> DeviceInfo {
+    const CLOUD_ALPHA: [Capability; 7] = [
+        Capability::Battery,
+        Capability::MicMute,
+        Capability::MicAttached,
+        Capability::Sidetone,
+        Capability::SidetoneLevel,
+        Capability::AutoOff,
+        Capability::VoicePrompts,
+    ];
+
+    fn info(instance: &str, capabilities: &[Capability]) -> DeviceInfo {
         DeviceInfo {
             id: DeviceId { backend: BackendKind::Demo, usb: UsbId::new(0x03F0, 0x098D), instance: instance.into() },
             name: format!("Headset {instance}"),
             vendor: "HyperX".into(),
-            capabilities: vec![Capability::Battery],
-            equalizer: None,
+            capabilities: capabilities.to_vec(),
+            equalizer: Some(EqualizerSpec {
+                bands: 2,
+                min: Gain::tenths(-60),
+                max: Gain::tenths(60),
+                step: Gain::tenths(10),
+                baseline: Gain::tenths(0),
+                presets: vec![
+                    EqPreset { name: "Flat".into(), curve: vec![Gain::tenths(0); 2] },
+                    EqPreset { name: "Bass".into(), curve: vec![Gain::tenths(40), Gain::tenths(0)] },
+                ],
+            }),
         }
     }
 
+    fn alpha(instance: &str) -> DeviceInfo {
+        info(instance, &CLOUD_ALPHA)
+    }
+
     fn changed(instance: &str, event: Event) -> AppEvent {
-        AppEvent::Changed(info(instance).id, event)
+        AppEvent::Changed(alpha(instance).id, event)
+    }
+
+    fn model_with(capabilities: &[Capability], events: Vec<Event>) -> Model {
+        let mut model = Model::default();
+        let device = info("a", capabilities);
+        model.apply(&AppEvent::Added(device.clone()));
+        for event in events {
+            model.apply(&AppEvent::Changed(device.id.clone(), event));
+        }
+        model
     }
 
     #[test]
@@ -182,87 +487,137 @@ mod tests {
     #[test]
     fn follows_the_connection() {
         let mut model = Model::default();
-        model.apply(&AppEvent::Added(info("a")));
+        model.apply(&AppEvent::Added(alpha("a")));
         assert_eq!(model.page(), Page::Missing { description: WAITING.into() });
         assert_eq!(model.title(), "Headset a");
         model.apply(&changed("a", Event::Connected(false)));
         assert_eq!(model.page(), Page::Off);
         model.apply(&changed("a", Event::Connected(true)));
         assert_eq!(model.page(), Page::Settings);
-        assert!(model.apply(&AppEvent::Removed(info("a").id)));
+        assert!(model.apply(&AppEvent::Removed(alpha("a").id)));
         assert_eq!(model.page(), Page::Missing { description: LOOKING.into() });
     }
 
     #[test]
     fn redraws_only_on_real_changes() {
         let mut model = Model::default();
-        model.apply(&AppEvent::Added(info("a")));
+        model.apply(&AppEvent::Added(alpha("a")));
         assert!(model.apply(&changed("a", Event::MicMuted(true))));
         assert!(!model.apply(&changed("a", Event::MicMuted(true))));
         assert!(!model.apply(&changed("other", Event::MicMuted(false))));
-        assert!(!model.apply(&AppEvent::Removed(info("other").id)));
+        assert!(!model.apply(&AppEvent::Removed(alpha("other").id)));
     }
 
     #[test]
-    fn re_adding_a_headset_starts_it_fresh() {
+    fn a_refused_setting_redraws_and_is_reported_once() {
         let mut model = Model::default();
-        model.apply(&AppEvent::Added(info("a")));
-        model.apply(&changed("a", Event::Connected(true)));
-        model.apply(&AppEvent::Added(info("a")));
-        assert_eq!(model.page(), Page::Missing { description: WAITING.into() });
+        assert!(model.apply(&AppEvent::Failed(alpha("a").id, "the headset is off".into())));
+        assert_eq!(model.take_failure().as_deref(), Some("the headset is off"));
+        assert_eq!(model.take_failure(), None);
     }
 
     #[test]
-    fn shows_the_first_headset() {
+    fn shows_the_first_headset_until_another_is_picked() {
         let mut model = Model::default();
-        model.apply(&AppEvent::Added(info("a")));
-        model.apply(&AppEvent::Added(info("b")));
+        model.apply(&AppEvent::Added(alpha("a")));
+        model.apply(&AppEvent::Added(alpha("b")));
         assert_eq!(model.title(), "Headset a");
+        assert!(model.select(&alpha("b").id));
+        assert_eq!(model.title(), "Headset b");
+        assert!(!model.select(&alpha("gone").id));
+        model.apply(&AppEvent::Removed(alpha("b").id));
+        assert_eq!(model.title(), "Headset a");
+        assert_eq!(model.devices().count(), 1);
     }
 
     #[test]
-    fn builds_the_settings_view() {
-        let mut model = Model::default();
-        model.apply(&AppEvent::Added(info("a")));
-        for event in [
-            Event::Connected(true),
-            Event::Battery(Percent::saturating(99)),
-            Event::Charge(ChargeState::Charging),
-            Event::MicMuted(true),
-            Event::MicAttached(false),
-            Event::Sidetone(true),
-            Event::SidetoneLevel(Percent::saturating(50)),
-            Event::AutoOff(AutoOff::minutes(20)),
-            Event::VoicePrompts(true),
-            Event::Color("Black/Red".into()),
-        ] {
-            model.apply(&changed("a", event));
-        }
-        assert_eq!(
-            model.view(),
-            Some(DeviceView {
-                title: "Headset a".into(),
-                subtitle: "Black/Red".into(),
-                battery: Some(99),
-                battery_text: "99%".into(),
-                charge_text: "Charging".into(),
-                muted: true,
-                mic_text: "Not attached".into(),
-                sidetone: true,
-                level: Some(50),
-                auto_off: Some(20),
-                voice_prompts: true,
-            })
-        );
-    }
-
-    #[test]
-    fn unknown_values_show_as_empty_or_off() {
-        let mut model = Model::default();
-        model.apply(&AppEvent::Added(info("a")));
+    fn the_cloud_alpha_gets_its_own_controls_only() {
+        let model = model_with(&CLOUD_ALPHA, vec![Event::Connected(true), Event::Sidetone(false)]);
         let view = model.view().unwrap();
-        assert_eq!((view.battery, view.battery_text.as_str(), view.charge_text.as_str()), (None, "", ""));
-        assert!(!view.muted && !view.sidetone && !view.voice_prompts);
+        let titles: Vec<&str> = view.sections.iter().map(|s| s.title).collect();
+        assert_eq!(titles, ["Microphone", "Mic monitoring", "Power and sounds"]);
+        let controls: Vec<Control> = view.layout().iter().map(|(c, _)| *c).collect();
+        assert_eq!(
+            controls,
+            [
+                Control::Mute,
+                Control::MicAttached,
+                Control::Sidetone,
+                Control::SidetoneLevel,
+                Control::AutoOff,
+                Control::VoicePrompts
+            ]
+        );
+        assert!(
+            !view.control(Control::SidetoneLevel).unwrap().sensitive,
+            "level is greyed out while monitoring is off"
+        );
+        assert!(view.has_battery);
+    }
+
+    #[test]
+    fn a_headset_with_everything_gets_every_control() {
+        let capabilities = [
+            Capability::Lights,
+            Capability::ChatMix,
+            Capability::NoiseFilter,
+            Capability::MicMuteLedBrightness,
+            Capability::EqualizerPreset,
+            Capability::BtCallVolume,
+            Capability::SidetoneLevel,
+        ];
+        let model = model_with(
+            &capabilities,
+            vec![Event::ChatMix(30), Event::NoiseFilter(NoiseFilter::High), Event::EqualizerPreset(1)],
+        );
+        let view = model.view().unwrap();
+        assert!(!view.has_battery);
+        assert_eq!(view.control(Control::ChatMix).unwrap().widget, Widget::Info("30 (more game)".into()));
+        assert_eq!(
+            view.control(Control::NoiseFilter).unwrap().widget,
+            Widget::Choice { options: vec!["Off".into(), "Low".into(), "High".into()], selected: Some(2) }
+        );
+        assert_eq!(
+            view.control(Control::EqualizerPreset).unwrap().widget,
+            Widget::Choice { options: vec!["Flat".into(), "Bass".into()], selected: Some(1) }
+        );
+        // without an on/off switch, the sidetone level is always adjustable
+        assert!(view.control(Control::SidetoneLevel).unwrap().sensitive);
+        assert!(view.control(Control::Lights).is_some() && view.control(Control::BtCallVolume).is_some());
+    }
+
+    #[test]
+    fn controls_turn_into_settings() {
+        let model =
+            model_with(&[Capability::AutoOff, Capability::EqualizerPreset], vec![Event::AutoOff(AutoOff::minutes(45))]);
+        assert_eq!(model.setting(Control::Lights, Input::Switch(true)), Some(Setting::Lights(true)));
+        assert_eq!(
+            model.setting(Control::MicVolume, Input::Level(40)),
+            Some(Setting::MicVolume(Percent::saturating(40)))
+        );
+        assert_eq!(model.setting(Control::NoiseFilter, Input::Choice(1)), Some(Setting::NoiseFilter(NoiseFilter::Low)));
+        assert_eq!(model.setting(Control::MuteLed, Input::Choice(3)), Some(Setting::MicMuteLedBrightness(3)));
+        assert_eq!(model.setting(Control::MuteLed, Input::Choice(4)), None);
+        assert_eq!(model.setting(Control::EqualizerPreset, Input::Choice(1)), Some(Setting::EqualizerPreset(1)));
+        assert_eq!(model.setting(Control::EqualizerPreset, Input::Choice(2)), None);
+        // the auto-off list includes the headset's own 45 minutes
+        assert_eq!(model.setting(Control::AutoOff, Input::Choice(4)), Some(Setting::AutoOff(AutoOff::minutes(45))));
+        assert_eq!(model.setting(Control::ChatMix, Input::Switch(true)), None);
+    }
+
+    #[test]
+    fn builds_the_battery_line() {
+        let model = model_with(
+            &CLOUD_ALPHA,
+            vec![
+                Event::Battery(Percent::saturating(99)),
+                Event::Charge(ChargeState::Charging),
+                Event::Color("Black/Red".into()),
+            ],
+        );
+        let view = model.view().unwrap();
+        assert_eq!((view.battery, view.battery_text.as_str()), (Some(99), "99%"));
+        assert_eq!((view.charge_text.as_str(), view.subtitle.as_str()), ("Charging", "Black/Red"));
     }
 
     #[test]

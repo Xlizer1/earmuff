@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use adw::prelude::*;
 use earmuff_application::Backend;
+use earmuff_domain::{NoiseFilter, Percent};
 use earmuff_infrastructure::demo::{DemoBackend, DemoHeadset, FullHeadset};
 use support::{Outcome, ensure, find, page, run_app, until, window};
 
@@ -73,13 +74,51 @@ async fn scenario(app: adw::Application, headset: DemoHeadset, other: FullHeadse
     headset.with(|sim, now| sim.set_battery(15, now));
     until("the new battery level", || battery.label() == "15%").await?;
 
+    // only the controls the headset has: the Cloud Alpha has no lights
+    ensure(find::<adw::SwitchRow>(&window, "lights").is_err(), "no lights control on the Cloud Alpha")?;
+
+    // the picker switches to the demo headset with every feature
+    let picker: gtk::DropDown = find(&window, "device-picker")?;
+    until("the picker to show both headsets", || picker.is_visible()).await?;
+    picker.set_selected(1);
+    until("the other headset", || title.title() == "Earmuff Demo Headset").await?;
+    until("its settings", || find::<adw::SwitchRow>(&window, "lights").is_ok()).await?;
+    let lights: adw::SwitchRow = find(&window, "lights")?;
+    let noise: adw::ComboRow = find(&window, "noise-filter")?;
+    let preset: adw::ComboRow = find(&window, "eq-preset")?;
+    let mic_volume: gtk::Scale = find(&window, "mic-volume")?;
+    let chatmix: adw::ActionRow = find(&window, "chatmix")?;
+    until("the lights to show as on", || lights.is_active()).await?;
+    ensure(selected_text(&preset) == "Flat", "starts on the flat preset")?;
+
+    lights.set_active(false);
+    until("the lights to turn off", || other.status().lights == Some(false)).await?;
+    noise.set_selected(2);
+    until("the noise filter to go high", || other.status().noise_filter == Some(NoiseFilter::High)).await?;
+    preset.set_selected(1);
+    until("the bass boost preset", || other.status().equalizer_preset == Some(1)).await?;
+    mic_volume.set_value(30.0);
+    until("the mic volume", || other.status().mic_volume == Some(Percent::saturating(30))).await?;
+
+    // turning the game/chat dial on the headset updates the window
+    other.set_chatmix(20);
+    until("the ChatMix reading", || chatmix.subtitle().as_deref() == Some("20 (more game)")).await?;
+
+    // and back to the Cloud Alpha
+    picker.set_selected(0);
+    until("the Cloud Alpha again", || title.title() == "Cloud Alpha Wireless (demo)").await?;
+
     // the headset turns off; a setting changes meanwhile; it turns back on
     headset.with(|sim, now| sim.set_powered(false, now));
     until("the headset-is-off page", || page(&window) == "off").await?;
     headset.with(|sim, _| sim.auto_off = 45);
     headset.with(|sim, now| sim.set_powered(true, now));
     until("the settings page again", || page(&window) == "settings").await?;
-    until("the auto-off set while it was off", || selected_text(&auto_off) == "45 minutes").await?;
+    // switching headsets rebuilt the page, so look the row up again
+    until("the auto-off set while it was off", || {
+        find::<adw::ComboRow>(&window, "auto-off").is_ok_and(|row| selected_text(&row) == "45 minutes")
+    })
+    .await?;
 
     // the dongle is unplugged: the window moves on to the other headset
     headset.unplug();
