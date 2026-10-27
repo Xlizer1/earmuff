@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use adw::prelude::*;
 use earmuff_application::Backend;
 use earmuff_domain::{Gain, NoiseFilter, Percent};
-use earmuff_infrastructure::demo::{DemoBackend, DemoHeadset, FullHeadset};
+use earmuff_infrastructure::demo::{DemoBackend, DemoHeadset, FULL_DEMO_USB, FullHeadset};
 use support::{Outcome, ensure, find, page, run_app, until, window};
 use zbus::zvariant::OwnedValue;
 
@@ -169,6 +169,10 @@ async fn scenario(
         .await?;
     login.set_active(false);
     until("the autostart entry to go", || !entry.exists()).await?;
+    // ...and switching the sound to a headset when it turns on
+    let sound: adw::SwitchRow = find(&window, "switch-audio")?;
+    ensure(!sound.is_active(), "sound switching is off at first")?;
+    sound.set_active(true);
     find::<adw::PreferencesDialog>(&window, "preferences")?.close();
     until("the dialog to close", || find::<adw::PreferencesDialog>(&window, "preferences").is_err()).await?;
 
@@ -278,6 +282,7 @@ async fn scenario(
     other.forget_settings();
     ensure(other.status().lights == Some(true), "the headset forgot the lights setting")?;
     other.set_powered(true);
+    until("the sound to switch to the headset", || support::audio_switches().contains(&FULL_DEMO_USB)).await?;
     until("the remembered settings to come back", || {
         let status = other.status();
         status.lights == Some(false)

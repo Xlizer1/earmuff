@@ -11,6 +11,8 @@ pub struct Preferences {
     pub notify_charged: bool,
     /// Put each headset's settings back when it reconnects
     pub remember_settings: bool,
+    /// Make a headset the computer's sound output and input when it turns on
+    pub switch_audio: bool,
 }
 
 impl Preferences {
@@ -24,7 +26,13 @@ impl Preferences {
 
 impl Default for Preferences {
     fn default() -> Self {
-        Preferences { accent: "red".into(), battery_alert: 20, notify_charged: true, remember_settings: true }
+        Preferences {
+            accent: "red".into(),
+            battery_alert: 20,
+            notify_charged: true,
+            remember_settings: true,
+            switch_audio: false,
+        }
     }
 }
 

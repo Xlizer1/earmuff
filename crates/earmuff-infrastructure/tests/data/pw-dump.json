@@ -1,0 +1,152 @@
+[
+  {
+    "id": 40,
+    "type": "PipeWire:Interface:Metadata",
+    "props": {
+      "metadata.name": "default"
+    },
+    "metadata": [
+      {
+        "subject": 0,
+        "key": "default.audio.sink",
+        "type": "Spa:String:JSON",
+        "value": {
+          "name": "alsa_output.pci-0000_00_1f.3.iec958-stereo"
+        }
+      },
+      {
+        "subject": 0,
+        "key": "default.audio.source",
+        "type": "Spa:String:JSON",
+        "value": {
+          "name": "alsa_input.pci-0000_00_1f.3.analog-stereo"
+        }
+      }
+    ]
+  },
+  {
+    "id": 51,
+    "type": "PipeWire:Interface:Device",
+    "info": {
+      "props": {
+        "device.vendor.id": "0x10de",
+        "device.product.id": "0x228b",
+        "device.name": "alsa_card.pci-0000_01_00.1",
+        "device.description": "GA104 High Definition Audio Controller",
+        "media.class": "Audio/Device",
+        "device.bus": "pci"
+      }
+    }
+  },
+  {
+    "id": 52,
+    "type": "PipeWire:Interface:Device",
+    "info": {
+      "props": {
+        "device.vendor.id": "0x03f0",
+        "device.product.id": "0x098d",
+        "device.name": "alsa_card.usb-HP__Inc_HyperX_Cloud_Alpha_Wireless_00000001-00",
+        "device.description": "HyperX Cloud Alpha Wireless",
+        "media.class": "Audio/Device",
+        "device.bus": "usb"
+      }
+    }
+  },
+  {
+    "id": 53,
+    "type": "PipeWire:Interface:Device",
+    "info": {
+      "props": {
+        "device.vendor.id": "0x8086",
+        "device.product.id": "0x06c8",
+        "device.name": "alsa_card.pci-0000_00_1f.3",
+        "device.description": "Built-in Audio",
+        "media.class": "Audio/Device",
+        "device.bus": "pci"
+      }
+    }
+  },
+  {
+    "id": 57,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "media.class": "Audio/Sink",
+        "node.name": "alsa_output.usb-HP__Inc_HyperX_Cloud_Alpha_Wireless_00000001-00.analog-stereo",
+        "node.description": "HyperX Cloud Alpha Wireless Analog Stereo",
+        "device.id": 52,
+        "priority.session": 1109,
+        "object.serial": 57
+      }
+    }
+  },
+  {
+    "id": 58,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "media.class": "Audio/Source",
+        "node.name": "alsa_input.usb-HP__Inc_HyperX_Cloud_Alpha_Wireless_00000001-00.mono-fallback",
+        "node.description": "HyperX Cloud Alpha Wireless Mono",
+        "device.id": 52,
+        "priority.session": 2100,
+        "object.serial": 58
+      }
+    }
+  },
+  {
+    "id": 34,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "media.class": "Audio/Sink",
+        "node.name": "alsa_output.pci-0000_00_1f.3.iec958-stereo",
+        "node.description": "Built-in Audio Digital Stereo (IEC958)",
+        "device.id": 53,
+        "priority.session": 736,
+        "object.serial": 59
+      }
+    }
+  },
+  {
+    "id": 46,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "media.class": "Audio/Source",
+        "node.name": "alsa_input.pci-0000_00_1f.3.analog-stereo",
+        "node.description": "Built-in Audio Analog Stereo",
+        "device.id": 53,
+        "priority.session": 2009,
+        "object.serial": 60
+      }
+    }
+  },
+  {
+    "id": 67,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "media.class": "Audio/Sink",
+        "node.name": "alsa_output.pci-0000_01_00.1.hdmi-stereo",
+        "node.description": "GA104 High Definition Audio Controller Digital Stereo (HDMI)",
+        "device.id": 51,
+        "priority.session": 696,
+        "object.serial": 72
+      }
+    }
+  },
+  {
+    "id": 73,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "media.class": "Audio/Sink",
+        "node.name": "easyeffects_sink",
+        "node.description": "Easy Effects Sink",
+        "priority.session": 0,
+        "object.serial": 79
+      }
+    }
+  }
+]

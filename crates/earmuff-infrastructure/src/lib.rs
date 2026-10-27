@@ -5,9 +5,11 @@
 //! - [`headsetcontrol`]: the backend for everything HeadsetControl supports
 //! - [`demo`]: simulated headsets, for the tests and as demo devices
 //! - [`config`]: Earmuff's own files, like its preferences
+//! - [`pipewire`]: the sound system, for switching the computer's sound to a headset
 
 pub mod config;
 pub mod demo;
 pub mod headsetcontrol;
 pub mod hidraw;
 pub mod native;
+pub mod pipewire;

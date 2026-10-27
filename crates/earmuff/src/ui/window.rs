@@ -12,10 +12,10 @@ use std::time::Duration;
 
 use adw::prelude::*;
 use earmuff_application::{
-    Alert, AppEvent, Autostart, Backend, BatteryAlerts, BatteryHistory, DeviceManager, Preferences, PreferencesStore,
-    Profiles, time_left_text,
+    Alert, AppEvent, AudioSwitch, AudioSystem, Autostart, Backend, BatteryAlerts, BatteryHistory, DeviceManager,
+    Preferences, PreferencesStore, Profiles, Switch, time_left_text, use_headset_when_ready,
 };
-use earmuff_domain::{DeviceId, Setting};
+use earmuff_domain::{DeviceId, Setting, UsbId};
 use gtk::gio;
 use gtk::glib::{self, SourceId};
 use ksni::TrayMethods;
@@ -172,6 +172,8 @@ struct Ui {
     preferences: RefCell<Preferences>,
     store: Arc<dyn PreferencesStore>,
     autostart: Arc<dyn Autostart>,
+    audio: Arc<dyn AudioSystem>,
+    audio_switch: RefCell<AudioSwitch>,
     alerts: RefCell<BatteryAlerts>,
     profiles: RefCell<Profiles>,
     history: RefCell<BatteryHistory>,
@@ -311,9 +313,11 @@ impl Ui {
             profiles: RefCell::new(Profiles::new(options.profiles.clone(), preferences.remember_settings)),
             history: RefCell::new(BatteryHistory::new(options.history.clone())),
             history_span: Cell::new(DAY),
+            audio_switch: RefCell::new(AudioSwitch::new(preferences.switch_audio)),
             preferences: RefCell::new(preferences),
             store,
             autostart: options.autostart.clone(),
+            audio: options.audio.clone(),
         })
     }
 
@@ -416,8 +420,21 @@ impl Ui {
                 ui.update_preferences(|preferences| preferences.remember_settings = row.is_active());
             }
         });
+        let sound = adw::SwitchRow::builder()
+            .name("switch-audio")
+            .title("Use the headset for sound")
+            .subtitle("Makes a headset the computer's speakers and mic when it turns on")
+            .active(self.preferences.borrow().switch_audio)
+            .build();
+        let weak = Rc::downgrade(self);
+        sound.connect_active_notify(move |row| {
+            if let Some(ui) = weak.upgrade() {
+                ui.update_preferences(|preferences| preferences.switch_audio = row.is_active());
+            }
+        });
         let headsets = adw::PreferencesGroup::builder().title("Headsets").build();
         headsets.add(&remember);
+        headsets.add(&sound);
 
         let notifications = adw::PreferencesGroup::builder().title("Notifications").build();
         notifications.add(&low);
@@ -460,6 +477,7 @@ impl Ui {
         change(&mut self.preferences.borrow_mut());
         self.alerts.borrow_mut().set_settings(self.preferences.borrow().alerts());
         self.profiles.borrow_mut().set_enabled(self.preferences.borrow().remember_settings);
+        self.audio_switch.borrow_mut().set_enabled(self.preferences.borrow().switch_audio);
         if let Err(error) = self.store.save(&self.preferences.borrow()) {
             self.toasts.add_toast(adw::Toast::new(&format!("Couldn't save preferences: {error}")));
         }
@@ -574,6 +592,31 @@ impl Ui {
                 for (device, setting) in restore {
                     ui.send_to(&device, setting);
                 }
+                let switch = ui.audio_switch.borrow_mut().on_event(&event);
+                if let Some(headset) = switch {
+                    ui.switch_audio(headset);
+                }
+            }
+        });
+    }
+
+    /// Makes a headset that just turned on the computer's sound device, off the main thread
+    fn switch_audio(self: &Rc<Self>, headset: UsbId) {
+        let audio = self.audio.clone();
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let result = gio::spawn_blocking(move || {
+                use_headset_when_ready(audio.as_ref(), headset, 10, Duration::from_millis(500))
+            })
+            .await;
+            let Some(ui) = weak.upgrade() else { return };
+            match result {
+                Ok(Ok(Switch::Switched(name))) => {
+                    ui.toasts.add_toast(adw::Toast::new(&format!("Sound switched to {name}")))
+                }
+                Ok(Err(error)) => ui.toasts.add_toast(adw::Toast::new(&format!("Couldn't switch the sound: {error}"))),
+                // already the default, or a headset without a sound card of its own (e.g. Bluetooth)
+                Ok(Ok(Switch::Already | Switch::NotFound)) | Err(_) => {}
             }
         });
     }

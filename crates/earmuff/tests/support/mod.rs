@@ -14,12 +14,13 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitCode, Stdio};
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use adw::prelude::*;
 use earmuff::ui::UiOptions;
-use earmuff_application::{Backend, ManagerOptions};
+use earmuff_application::{AudioSystem, Backend, ManagerOptions, Switch};
+use earmuff_domain::UsbId;
 use earmuff_infrastructure::config::{CsvHistoryStore, JsonPreferencesStore, JsonProfileStore, XdgAutostart};
 use gtk::glib;
 
@@ -165,6 +166,24 @@ fn run_child(name: &str) -> Result<bool, String> {
     }
 }
 
+/// Stands in for the sound system, so tests never change the computer's sound settings
+#[derive(Default)]
+pub struct RecordingAudio(Mutex<Vec<UsbId>>);
+
+impl AudioSystem for RecordingAudio {
+    fn use_headset(&self, headset: UsbId) -> Result<Switch, String> {
+        self.0.lock().unwrap().push(headset);
+        Ok(Switch::Switched("Demo speakers".into()))
+    }
+}
+
+static AUDIO: LazyLock<Arc<RecordingAudio>> = LazyLock::new(Arc::default);
+
+/// The headsets the app has switched the sound to so far
+pub fn audio_switches() -> Vec<UsbId> {
+    AUDIO.0.lock().unwrap().clone()
+}
+
 /// Settings that make the app react fast enough for tests
 pub fn options(tray: bool) -> UiOptions {
     UiOptions {
@@ -177,6 +196,7 @@ pub fn options(tray: bool) -> UiOptions {
         autostart: Arc::new(XdgAutostart::for_this_program()),
         profiles: Arc::new(JsonProfileStore::in_config_dir()),
         history: Arc::new(CsvHistoryStore::in_state_dir()),
+        audio: AUDIO.clone(),
     }
 }
 

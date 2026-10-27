@@ -10,8 +10,11 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use adw::prelude::*;
-use earmuff_application::{Autostart, Backend, HistoryStore, ManagerOptions, PreferencesStore, ProfileStore};
+use earmuff_application::{
+    AudioSystem, Autostart, Backend, HistoryStore, ManagerOptions, PreferencesStore, ProfileStore,
+};
 use earmuff_infrastructure::config::{CsvHistoryStore, JsonPreferencesStore, JsonProfileStore, XdgAutostart};
+use earmuff_infrastructure::pipewire::PipeWire;
 use gtk::gio;
 
 pub const APP_ID: &str = "io.github.xlizer1.Earmuff";
@@ -38,6 +41,8 @@ pub struct UiOptions {
     pub autostart: Arc<dyn Autostart>,
     pub profiles: Arc<dyn ProfileStore>,
     pub history: Arc<dyn HistoryStore>,
+    /// The sound system, for switching the computer's sound to a headset
+    pub audio: Arc<dyn AudioSystem>,
 }
 
 impl Default for UiOptions {
@@ -52,6 +57,7 @@ impl Default for UiOptions {
             autostart: Arc::new(XdgAutostart::for_this_program()),
             profiles: Arc::new(JsonProfileStore::in_config_dir()),
             history: Arc::new(CsvHistoryStore::in_state_dir()),
+            audio: Arc::new(PipeWire::default()),
         }
     }
 }

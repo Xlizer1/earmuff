@@ -75,6 +75,7 @@ impl PreferencesStore for JsonPreferencesStore {
             battery_alert: number("battery_alert", defaults.battery_alert).min(100),
             notify_charged: flag("notify_charged", defaults.notify_charged),
             remember_settings: flag("remember_settings", defaults.remember_settings),
+            switch_audio: flag("switch_audio", defaults.switch_audio),
         }
     }
 
@@ -85,6 +86,7 @@ impl PreferencesStore for JsonPreferencesStore {
             "battery_alert": preferences.battery_alert,
             "notify_charged": preferences.notify_charged,
             "remember_settings": preferences.remember_settings,
+            "switch_audio": preferences.switch_audio,
         });
         saved.extend(current.as_object().cloned().unwrap_or_default());
         let text = serde_json::to_string_pretty(&Value::Object(saved)).map_err(|e| e.to_string())?;
@@ -308,8 +310,13 @@ mod tests {
     #[test]
     fn saves_and_loads() {
         let (_dir, store) = store();
-        let saved =
-            Preferences { accent: "cyan".into(), battery_alert: 15, notify_charged: false, remember_settings: false };
+        let saved = Preferences {
+            accent: "cyan".into(),
+            battery_alert: 15,
+            notify_charged: false,
+            remember_settings: false,
+            switch_audio: true,
+        };
         store.save(&saved).unwrap();
         assert_eq!(store.load(), saved);
     }
