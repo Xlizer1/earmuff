@@ -6,6 +6,7 @@
 
 mod manager;
 mod ports;
+mod preferences;
 mod usecases;
 
 #[cfg(test)]
@@ -13,4 +14,5 @@ mod testing;
 
 pub use manager::{AppEvent, DeviceManager, ManagerOptions};
 pub use ports::{Backend, BackendError, Session, SessionError, Waker};
+pub use preferences::{Preferences, PreferencesStore};
 pub use usecases::{Found, apply_settings, discover, open_device, open_first, read_status, settle};
