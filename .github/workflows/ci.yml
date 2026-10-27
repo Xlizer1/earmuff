@@ -13,8 +13,9 @@ jobs:
     container: archlinux:latest
     steps:
       - name: Install build and test dependencies
-        # dbus-daemon and gtk4-broadwayd (part of gtk4) run the headless window and tray tests
-        run: pacman -Syu --noconfirm --needed base-devel git rust gtk4 libadwaita dbus ttf-dejavu
+        # dbus-daemon and gtk4-broadwayd (part of gtk4) run the headless window and tray tests;
+        # headsetcontrol's mock headset runs the HeadsetControl backend tests
+        run: pacman -Syu --noconfirm --needed base-devel git rust gtk4 libadwaita dbus ttf-dejavu headsetcontrol
 
       - uses: actions/checkout@v4
 
