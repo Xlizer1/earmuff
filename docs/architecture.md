@@ -38,16 +38,22 @@ something to send.
 
 - **Native** (`NativeBackend`): finds dongles in `/sys/class/hidraw` whose USB ID has
   a codec in `earmuff-protocols`, and talks to them through `/dev/hidraw*`.
+- **HeadsetControl** (`HeadsetControlBackend`): runs the `headsetcontrol` program
+  and reads its JSON API (1.x), for the ~40 models it supports. Discovery only runs
+  it again when the hidraw devices change; sessions poll it for the battery,
+  connection, ChatMix and sidetone, and report write-only settings as set once
+  HeadsetControl confirms them. A headset both backends reach stays native.
 - **Demo** (`DemoBackend`): a byte-level simulator of the Cloud Alpha Wireless,
-  driven through the same native session and codec as the real headset. Run
-  `earmuff --demo` to try it; the tests use it everywhere.
+  driven through the same native session and codec as the real headset, and a
+  "headset with every feature" simulated at the domain level. Run `earmuff --demo`
+  to try them; the tests use them everywhere.
 
 ## Tests
 
 | Kind | Where | What runs |
 |---|---|---|
 | Unit | `#[cfg(test)]` in every crate | value rules, codecs against captured bytes, use cases and the manager with fakes, view models, CLI formatting |
-| Integration | `crates/earmuff-infrastructure/tests/` | native session + codec + use cases against the simulator; the manager against a demo headset; discovery in a fake sysfs |
+| Integration | `crates/earmuff-infrastructure/tests/` | native session + codec + use cases against the simulator; the manager against a demo headset; discovery in a fake sysfs; the HeadsetControl backend against the real program's mock headset |
 | End to end | `crates/earmuff/tests/` | the `earmuff` binary (`cli.rs`); the real window driven like a user (`window.rs`); the tray icon over D-Bus (`tray.rs`) |
 | Hardware | `crates/earmuff-infrastructure/tests/hardware.rs` | opt-in, against a real Cloud Alpha Wireless; puts every setting back afterwards |
 

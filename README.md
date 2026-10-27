@@ -5,20 +5,27 @@ like HyperX NGENUITY. Written in Rust with GTK4 and libadwaita.
 
 ## Supported headsets
 
-| Headset | Connection |
-|---|---|
-| HyperX Cloud Alpha Wireless | USB dongle (03f0:098d) |
+- **HyperX Cloud Alpha Wireless**, with Earmuff's own driver: instant updates and
+  every setting read back from the headset.
+- **About 40 more models** from Logitech, SteelSeries, Corsair, HyperX, Sony, Audeze,
+  Jabra, Roccat and others, when [HeadsetControl](https://github.com/Sapd/HeadsetControl)
+  is installed.
 
-Support for many more headsets is on the way.
+The full list with USB IDs is in [docs/supported-headsets.md](docs/supported-headsets.md).
+No headset at hand? `earmuff --demo` runs everything with simulated ones.
 
 ## What it does
 
-Run `earmuff`, or open "Earmuff" from the app menu:
+Run `earmuff`, or open "Earmuff" from the app menu. It shows what your headset has:
 
 - battery level and charging state
-- mic mute, in sync with the button on the headset
+- mic mute (in sync with the button on the headset), mic volume, noise filter,
+  mute-when-raised and the mute light
 - mic monitoring (hearing your own voice) on/off and level
-- auto power-off time and voice prompts
+- equalizer presets, ChatMix, volume limiter and lights
+- auto power-off, voice prompts and the Bluetooth options
+
+With several headsets connected, a picker in the header switches between them.
 
 Earmuff puts a headset icon in the system tray (Waybar's tray, KDE, or GNOME with the
 AppIndicator extension). Hover it for the battery; right-click for mic mute, Open and
@@ -28,14 +35,16 @@ the tray until you pick Quit. On a desktop without a tray, closing the window qu
 ## Command line
 
 ```
-earmuff status [--json]           battery and all settings
-earmuff sidetone on|off|0-100%    mic monitoring
-earmuff auto-off MINUTES          0-255, 0 = never
-earmuff voice-prompts on|off
-earmuff mute on|off
+earmuff list [--json]             headsets Earmuff can reach
+earmuff status [--json]           battery and every setting
+earmuff set SETTING VALUE         e.g. set sidetone 40%, set eq-preset "Bass boost"
+earmuff play-sound N              play one of the headset's notification sounds
 earmuff waybar                    JSON for a Waybar custom module
 earmuff monitor [--raw]           print what the headset reports, live
 ```
+
+`-d VID:PID` picks a headset (see `earmuff list`); without it, Earmuff uses the
+first one it finds. `earmuff set --help` lists every setting.
 
 `monitor --raw` prints every report in hex: leave it running, press a button or change
 a setting, and watch which bytes move. That's how new headsets get supported; see
