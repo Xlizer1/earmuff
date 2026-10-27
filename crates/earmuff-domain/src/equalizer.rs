@@ -91,6 +91,19 @@ impl EqualizerSpec {
     pub fn flat(&self) -> Vec<Gain> {
         vec![self.baseline; self.bands]
     }
+
+    /// The nearest curve this equalizer takes: each gain on a step, within range
+    pub fn snap(&self, curve: &[Gain]) -> Vec<Gain> {
+        let step = self.step.0.max(1);
+        curve
+            .iter()
+            .map(|gain| {
+                let offset = f64::from(gain.0 - self.baseline.0) / f64::from(step);
+                let snapped = (offset.round() as i16).saturating_mul(step).saturating_add(self.baseline.0);
+                Gain(snapped.clamp(self.min.0, self.max.0))
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -106,6 +119,13 @@ mod tests {
             baseline: Gain::tenths(0),
             presets: vec![],
         }
+    }
+
+    #[test]
+    fn snaps_a_curve_onto_the_steps_and_into_range() {
+        let curve = [Gain::tenths(23), Gain::tenths(-7), Gain::tenths(200)];
+        assert_eq!(spec().snap(&curve), [Gain::tenths(25), Gain::tenths(-5), Gain::tenths(120)]);
+        assert_eq!(spec().check(&spec().snap(&curve)), Ok(()));
     }
 
     #[test]

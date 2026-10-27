@@ -168,3 +168,18 @@ levelbar.sidebar-battery trough {
   color: var(--accent-color);
   margin-left: 6px;
 }
+
+/* graphs and the equalizer preview draw in the accent color */
+.battery-graph,
+.eq-preview {
+  color: var(--accent-color);
+}
+
+.eq-value {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.eq-band {
+  font-size: 11px;
+}

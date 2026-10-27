@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use adw::prelude::*;
 use earmuff_application::Backend;
-use earmuff_domain::{NoiseFilter, Percent};
+use earmuff_domain::{Gain, NoiseFilter, Percent};
 use earmuff_infrastructure::demo::{DemoBackend, DemoHeadset, FullHeadset};
 use support::{Outcome, ensure, find, page, run_app, until, window};
 use zbus::zvariant::OwnedValue;
@@ -246,6 +246,18 @@ async fn scenario(
     until("the noise filter to go high", || other.status().noise_filter == Some(NoiseFilter::High)).await?;
     preset.set_selected(1);
     until("the bass boost preset", || other.status().equalizer_preset == Some(1)).await?;
+
+    // the equalizer shows the preset's curve band by band; moving a band makes it the user's own
+    let low: gtk::Scale = find(&window, "eq-band-0")?;
+    until("the bass boost curve", || low.value() == 6.0).await?;
+    let high: gtk::Scale = find(&window, "eq-band-9")?;
+    high.set_value(3.2);
+    let own: Vec<Gain> = [60, 40, 20, 0, 0, 0, 0, 0, 0, 30].map(Gain::tenths).to_vec();
+    until("the curve to reach the headset", || other.status().equalizer.as_ref() == Some(&own)).await?;
+    until("the preset to show as custom", || selected_text(&preset) == "Custom").await?;
+    find::<gtk::Button>(&window, "equalizer-flat")?.emit_clicked();
+    until("a flat curve", || other.status().equalizer == Some(vec![Gain::tenths(0); 10])).await?;
+    until("the flat preset", || selected_text(&preset) == "Flat").await?;
     mic_volume.set_value(30.0);
     until("the mic volume", || other.status().mic_volume == Some(Percent::saturating(30))).await?;
 

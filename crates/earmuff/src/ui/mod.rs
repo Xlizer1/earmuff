@@ -2,6 +2,7 @@
 
 mod battery_graph;
 mod battery_ring;
+mod equalizer;
 pub mod view_model;
 mod window;
 

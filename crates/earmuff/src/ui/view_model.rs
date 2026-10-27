@@ -3,7 +3,8 @@
 
 use earmuff_application::AppEvent;
 use earmuff_domain::{
-    AutoOff, BackendKind, Capability, ChargeState, DeviceId, DeviceInfo, NoiseFilter, Percent, Setting, Status,
+    AutoOff, BackendKind, Capability, ChargeState, DeviceId, DeviceInfo, EqualizerSpec, Gain, NoiseFilter, Percent,
+    Setting, Status,
 };
 
 pub const LOOKING: &str = "Looking for a supported headset…";
@@ -95,6 +96,7 @@ pub enum Control {
     Sidetone,
     SidetoneLevel,
     EqualizerPreset,
+    Equalizer,
     ChatMix,
     VolumeLimiter,
     Lights,
@@ -121,6 +123,7 @@ impl Control {
             Control::Sidetone => "sidetone",
             Control::SidetoneLevel => "level",
             Control::EqualizerPreset => "eq-preset",
+            Control::Equalizer => "equalizer",
             Control::ChatMix => "chatmix",
             Control::VolumeLimiter => "volume-limiter",
             Control::Lights => "lights",
@@ -151,6 +154,31 @@ pub enum Widget {
     Balance(Option<u8>),
     /// A button that does something once
     Button(&'static str),
+    /// An equalizer curve to shape band by band
+    Curve(CurveView),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CurveView {
+    /// The headset's curve, or the flat one while that isn't known
+    pub gains: Vec<Gain>,
+    pub min: Gain,
+    pub max: Gain,
+    pub step: Gain,
+    pub baseline: Gain,
+    /// What each band is called, low to high
+    pub labels: Vec<String>,
+}
+
+/// Band names: the usual octave centres for a 10-band equalizer, numbers otherwise
+/// (headsets don't say which frequencies their bands are at)
+pub fn band_labels(bands: usize) -> Vec<String> {
+    const OCTAVES: [&str; 10] = ["32", "64", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"];
+    if bands == OCTAVES.len() {
+        OCTAVES.map(String::from).to_vec()
+    } else {
+        (1..=bands).map(|band| band.to_string()).collect()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -281,7 +309,7 @@ fn charge_text(status: &Status) -> &'static str {
 }
 
 /// What the user did to a control
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
     Switch(bool),
     /// 0 to 100
@@ -289,6 +317,7 @@ pub enum Input {
     /// The index of the chosen option
     Choice(u32),
     Press,
+    Curve(Vec<Gain>),
 }
 
 impl Model {
@@ -430,6 +459,10 @@ impl Model {
                 (choice(i)? < presets).then_some(Setting::EqualizerPreset(u8::try_from(i).ok()?))?
             }
             (Control::NotificationSound, Input::Press) => Setting::PlayNotificationSound(0),
+            (Control::Equalizer, Input::Curve(gains)) => {
+                let spec = info.equalizer.as_ref()?;
+                (gains.len() == spec.bands).then(|| Setting::Equalizer(spec.snap(&gains)))?
+            }
             (Control::AutoOff, Input::Choice(i)) => {
                 let minutes = *auto_off_choices(status.auto_off.map(AutoOff::get)).get(choice(i)?)?;
                 Setting::AutoOff(AutoOff::minutes(minutes))
@@ -455,6 +488,48 @@ fn choice(control: Control, title: &'static str, options: Vec<String>, selected:
 fn info_row(control: Control, title: &'static str, text: String) -> ControlView {
     ControlView { control, title, subtitle: None, widget: Widget::Info(text), sensitive: true }
 }
+
+/// The preset list and the curve. A curve that matches no preset shows as "Custom".
+fn equalizer_controls(eq: &EqualizerSpec, s: &Status, presets: bool, curve: bool) -> Vec<Option<ControlView>> {
+    let known = s.equalizer.clone().filter(|gains| gains.len() == eq.bands);
+    let preset_view = (presets && !eq.presets.is_empty()).then(|| {
+        let mut options: Vec<String> = eq.presets.iter().map(|p| p.name.clone()).collect();
+        let reported = s.equalizer_preset.map(usize::from);
+        let selected = match &known {
+            None => reported,
+            Some(gains) => reported
+                .filter(|i| eq.presets.get(*i).is_some_and(|p| &p.curve == gains))
+                .or_else(|| eq.presets.iter().position(|p| &p.curve == gains))
+                .or_else(|| {
+                    options.push(CUSTOM.into());
+                    Some(options.len() - 1)
+                }),
+        };
+        choice(Control::EqualizerPreset, "Preset", options, selected)
+    });
+    let curve_view = curve.then(|| {
+        let preset = s.equalizer_preset.and_then(|i| eq.presets.get(usize::from(i))).map(|p| p.curve.clone());
+        let gains = known.or(preset).filter(|gains| gains.len() == eq.bands).unwrap_or_else(|| eq.flat());
+        ControlView {
+            control: Control::Equalizer,
+            title: "Curve",
+            subtitle: None,
+            widget: Widget::Curve(CurveView {
+                gains,
+                min: eq.min,
+                max: eq.max,
+                step: eq.step,
+                baseline: eq.baseline,
+                labels: band_labels(eq.bands),
+            }),
+            sensitive: true,
+        }
+    });
+    vec![preset_view, curve_view]
+}
+
+/// The preset list's entry for a curve of the user's own
+pub const CUSTOM: &str = "Custom";
 
 /// The settings page's groups, with only the controls this headset has
 fn sections(info: &DeviceInfo, s: &Status) -> Vec<SectionView> {
@@ -516,16 +591,11 @@ fn sections(info: &DeviceInfo, s: &Status) -> Vec<SectionView> {
         ],
     );
 
-    let presets: Vec<String> =
-        info.equalizer.as_ref().map(|eq| eq.presets.iter().map(|p| p.name.clone()).collect()).unwrap_or_default();
     add(
         Tab::Audio,
         "Sound",
         None,
         vec![
-            (has(Capability::EqualizerPreset) && !presets.is_empty()).then(|| {
-                choice(Control::EqualizerPreset, "Equalizer preset", presets, s.equalizer_preset.map(usize::from))
-            }),
             has(Capability::ChatMix).then_some(ControlView {
                 control: Control::ChatMix,
                 title: "ChatMix",
@@ -538,6 +608,15 @@ fn sections(info: &DeviceInfo, s: &Status) -> Vec<SectionView> {
             }),
         ],
     );
+
+    if let Some(eq) = &info.equalizer {
+        add(
+            Tab::Audio,
+            "Equalizer",
+            None,
+            equalizer_controls(eq, s, has(Capability::EqualizerPreset), has(Capability::Equalizer)),
+        );
+    }
 
     add(
         Tab::Lighting,
@@ -627,7 +706,7 @@ pub fn auto_off_choices(current: Option<u8>) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use earmuff_domain::{BackendKind, EqPreset, EqualizerSpec, Event, Gain, UsbId};
+    use earmuff_domain::{BackendKind, EqPreset, Event, UsbId};
 
     const CLOUD_ALPHA: [Capability; 7] = [
         Capability::Battery,
@@ -805,6 +884,50 @@ mod tests {
         assert_eq!(view.tabs(), Tab::ALL);
     }
 
+    fn curve_of(view: &DeviceView) -> Vec<Gain> {
+        match &view.control(Control::Equalizer).unwrap().widget {
+            Widget::Curve(curve) => curve.gains.clone(),
+            other => panic!("not a curve: {other:?}"),
+        }
+    }
+
+    fn presets_of(view: &DeviceView) -> (Vec<String>, Option<u32>) {
+        match &view.control(Control::EqualizerPreset).unwrap().widget {
+            Widget::Choice { options, selected } => (options.clone(), *selected),
+            other => panic!("not a choice: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_equalizer_shows_the_curve_and_calls_a_curve_of_your_own_custom() {
+        const EQ: [Capability; 2] = [Capability::EqualizerPreset, Capability::Equalizer];
+        let (flat, bass) = (vec![Gain::tenths(0); 2], vec![Gain::tenths(40), Gain::tenths(0)]);
+        // nothing known yet: flat
+        let view = model_with(&EQ, vec![]).view().unwrap();
+        assert_eq!(curve_of(&view), flat);
+        assert!(view.sections.iter().any(|s| s.title == "Equalizer" && s.controls.len() == 2));
+        // a preset shows its curve
+        let view = model_with(&EQ, vec![Event::EqualizerPreset(1)]).view().unwrap();
+        assert_eq!(curve_of(&view), bass);
+        // a curve that matches a preset picks it
+        let view = model_with(&EQ, vec![Event::Equalizer(bass.clone())]).view().unwrap();
+        assert_eq!(presets_of(&view), (vec!["Flat".into(), "Bass".into()], Some(1)));
+        // anything else is the user's own
+        let own = vec![Gain::tenths(10), Gain::tenths(-20)];
+        let view = model_with(&EQ, vec![Event::EqualizerPreset(1), Event::Equalizer(own.clone())]).view().unwrap();
+        assert_eq!(curve_of(&view), own);
+        assert_eq!(presets_of(&view), (vec!["Flat".into(), "Bass".into(), CUSTOM.into()], Some(2)));
+        // and picking "Custom" itself does nothing
+        let model = model_with(&EQ, vec![Event::Equalizer(own)]);
+        assert_eq!(model.setting(Control::EqualizerPreset, Input::Choice(2)), None);
+    }
+
+    #[test]
+    fn bands_are_named_by_frequency_when_there_are_ten() {
+        assert_eq!(band_labels(10)[5], "1k");
+        assert_eq!(band_labels(3), ["1", "2", "3"]);
+    }
+
     #[test]
     fn the_banner_says_how_the_headset_is_doing() {
         let on_battery = model_with(
@@ -857,6 +980,12 @@ mod tests {
         assert_eq!(model.setting(Control::MuteLed, Input::Choice(4)), None);
         assert_eq!(model.setting(Control::EqualizerPreset, Input::Choice(1)), Some(Setting::EqualizerPreset(1)));
         assert_eq!(model.setting(Control::EqualizerPreset, Input::Choice(2)), None);
+        // a curve goes onto the equalizer's steps and into its range
+        assert_eq!(
+            model.setting(Control::Equalizer, Input::Curve(vec![Gain::tenths(23), Gain::tenths(-90)])),
+            Some(Setting::Equalizer(vec![Gain::tenths(20), Gain::tenths(-60)]))
+        );
+        assert_eq!(model.setting(Control::Equalizer, Input::Curve(vec![Gain::tenths(0)])), None);
         // the auto-off list includes the headset's own 45 minutes
         assert_eq!(model.setting(Control::AutoOff, Input::Choice(4)), Some(Setting::AutoOff(AutoOff::minutes(45))));
         assert_eq!(model.setting(Control::ChatMix, Input::Switch(true)), None);

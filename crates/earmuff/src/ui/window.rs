@@ -22,6 +22,7 @@ use ksni::TrayMethods;
 
 use super::battery_graph::{BatteryGraph, DAY, WEEK};
 use super::battery_ring::BatteryRing;
+use super::equalizer::EqualizerEditor;
 use super::view_model::{
     ACCENTS, BATTERY_ALERTS, Control, ControlView, DeviceView, Input, Model, Page, SidebarItem, Tab, Widget,
     accent_class, accent_index, alert_text, autostart_hint, battery_alert_index, battery_alert_label,
@@ -60,6 +61,7 @@ enum Row {
     /// A read-only meter, e.g. the ChatMix game/chat balance
     Balance(adw::ActionRow, gtk::Scale),
     Button(adw::ActionRow),
+    Curve(adw::PreferencesRow, Rc<EqualizerEditor>),
 }
 
 /// The tabs as currently built
@@ -521,19 +523,22 @@ impl Ui {
     }
 
     /// Waits until a slider stops for a moment instead of sending every step of a drag
-    fn schedule_level(self: &Rc<Self>, control: Control) {
+    fn schedule_input(self: &Rc<Self>, control: Control) {
         if let Some(id) = self.level_timers.borrow_mut().remove(&control) {
             id.remove();
         }
         let weak = Rc::downgrade(self);
-        let id = glib::timeout_add_local_once(Duration::from_millis(150), move || {
+        // a curve takes longer to send, so wait a little longer for the drag to end
+        let wait = if control == Control::Equalizer { 300 } else { 150 };
+        let id = glib::timeout_add_local_once(Duration::from_millis(wait), move || {
             let Some(ui) = weak.upgrade() else { return };
             ui.level_timers.borrow_mut().remove(&control);
-            let value = match ui.rows.borrow().rows.get(&control) {
-                Some(Row::Level(_, scale)) => scale.value().round().clamp(0.0, 100.0) as u8,
+            let input = match ui.rows.borrow().rows.get(&control) {
+                Some(Row::Level(_, scale)) => Input::Level(scale.value().round().clamp(0.0, 100.0) as u8),
+                Some(Row::Curve(_, editor)) => Input::Curve(editor.gains()),
                 _ => return,
             };
-            ui.input(control, Input::Level(value));
+            ui.input(control, input);
         });
         self.level_timers.borrow_mut().insert(control, id);
     }
@@ -745,6 +750,7 @@ impl Ui {
                             row.upcast_ref()
                         }
                         Row::Choice(row) => row.upcast_ref(),
+                        Row::Curve(row, _) => row.upcast_ref(),
                     });
                     rows.insert(control.control, row);
                 }
@@ -782,12 +788,28 @@ impl Ui {
                     if let Some(ui) = weak.upgrade()
                         && !ui.syncing.get()
                     {
-                        ui.schedule_level(control);
+                        ui.schedule_input(control);
                     }
                 });
                 let row = adw::ActionRow::builder().name(format!("{}-row", control.name())).title(view.title).build();
                 row.add_suffix(&scale);
                 Row::Level(row, scale)
+            }
+            Widget::Curve(curve) => {
+                let editor = EqualizerEditor::new(curve, move || {
+                    if let Some(ui) = weak.upgrade()
+                        && !ui.syncing.get()
+                    {
+                        ui.schedule_input(control);
+                    }
+                });
+                let row = adw::PreferencesRow::builder()
+                    .name(format!("{}-row", control.name()))
+                    .title(view.title)
+                    .activatable(false)
+                    .child(&editor.widget)
+                    .build();
+                Row::Curve(row, editor)
             }
             Widget::Choice { options, .. } => {
                 let options: Vec<&str> = options.iter().map(String::as_str).collect();
@@ -883,6 +905,12 @@ impl Ui {
                     meter.set_value(value.map_or(64.0, f64::from));
                 }
                 (Some(Row::Button(row)), Widget::Button(_)) => row.set_sensitive(control.sensitive),
+                // a band still being dragged keeps where the user put it
+                (Some(Row::Curve(_, editor)), Widget::Curve(curve))
+                    if !self.level_timers.borrow().contains_key(&control.control) =>
+                {
+                    editor.show(curve);
+                }
                 _ => {}
             }
         }
