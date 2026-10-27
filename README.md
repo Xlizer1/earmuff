@@ -99,3 +99,7 @@ new binary the next time it opens.
 
 Access to `/dev/hidrawN` comes from HeadsetControl's udev rule
 (`/usr/lib/udev/rules.d/70-headsets.rules`), so keep the `headsetcontrol` package installed.
+
+## License
+
+GPL-3.0-or-later. See [LICENSE](LICENSE).
