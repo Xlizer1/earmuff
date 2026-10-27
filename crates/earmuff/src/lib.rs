@@ -20,11 +20,11 @@ pub fn run() -> ExitCode {
     let backends = backends(args.demo);
     match args.command {
         None => ui::run(backends, ui::UiOptions { demo: args.demo, ..Default::default() }),
-        Some(command) => cli::run(command, &backends),
+        Some(command) => cli::run(command, args.device, &backends),
     }
 }
 
-/// The backends in priority order. `demo` swaps real headsets for a simulated one.
+/// The backends in priority order. `demo` swaps real headsets for simulated ones.
 pub fn backends(demo: bool) -> Vec<Arc<dyn Backend>> {
     if demo { vec![Arc::new(DemoBackend::new())] } else { vec![Arc::new(NativeBackend::new())] }
 }

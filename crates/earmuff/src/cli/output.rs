@@ -140,6 +140,34 @@ pub fn status_json(info: &DeviceInfo, s: &Status) -> Value {
     })
 }
 
+/// The `list` command's text: one headset per line
+pub fn list_text(devices: &[DeviceInfo]) -> String {
+    if devices.is_empty() {
+        return "No supported headset found.\n".into();
+    }
+    devices.iter().map(|d| format!("{}  {}  ({})\n", d.id.usb, d.name, d.id.backend)).collect()
+}
+
+/// The `list --json` output
+pub fn list_json(devices: &[DeviceInfo]) -> Value {
+    Value::Array(
+        devices
+            .iter()
+            .map(|d| {
+                let mut capabilities: Vec<&str> = d.capabilities.iter().map(|c| c.name()).collect();
+                capabilities.dedup();
+                json!({
+                    "usb_id": d.id.usb.to_string(),
+                    "name": d.name,
+                    "vendor": d.vendor,
+                    "backend": d.id.backend.to_string(),
+                    "capabilities": capabilities,
+                })
+            })
+            .collect(),
+    )
+}
+
 /// One line of JSON for a Waybar custom module. `None` (no headset) hides the module.
 pub fn waybar_json(status: Option<&Status>) -> Value {
     let Some(s) = status else {
@@ -324,6 +352,20 @@ mod tests {
         assert_eq!(value["lights"], Value::Null);
         let eq = Status { equalizer: Some(vec![Gain::tenths(25)]), ..Status::default() };
         assert_eq!(status_json(&info(&[]), &eq)["equalizer"], json!([2.5]));
+    }
+
+    #[test]
+    fn lists_headsets() {
+        assert_eq!(list_text(&[]), "No supported headset found.\n");
+        let alpha = info(&CLOUD_ALPHA);
+        assert_eq!(list_text(std::slice::from_ref(&alpha)), "03f0:098d  Cloud Alpha Wireless  (demo)\n");
+        let json = list_json(&[alpha]);
+        assert_eq!(json[0]["usb_id"], "03f0:098d");
+        // sidetone on/off and level are one setting on the command line
+        assert_eq!(
+            json[0]["capabilities"],
+            json!(["battery", "mute", "mic boom detection", "sidetone", "auto-off", "voice-prompts"])
+        );
     }
 
     #[test]
