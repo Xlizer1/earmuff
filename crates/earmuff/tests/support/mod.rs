@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use adw::prelude::*;
 use earmuff::ui::UiOptions;
-use earmuff_application::{AudioSystem, Backend, ManagerOptions, Switch};
+use earmuff_application::{AudioSystem, Backend, ManagerOptions, MicRecorder, Recording, Switch};
 use earmuff_domain::UsbId;
 use earmuff_infrastructure::config::{CsvHistoryStore, JsonPreferencesStore, JsonProfileStore, XdgAutostart};
 use gtk::glib;
@@ -184,6 +184,33 @@ pub fn audio_switches() -> Vec<UsbId> {
     AUDIO.0.lock().unwrap().clone()
 }
 
+/// Stands in for the mic: "records" a short sound with a rising level, and keeps track
+/// of what it was asked to play
+#[derive(Default)]
+pub struct FakeMic(Mutex<Vec<(UsbId, Recording)>>);
+
+impl MicRecorder for FakeMic {
+    fn record(&self, _: UsbId, _: Duration, level: &mut dyn FnMut(f64)) -> Result<Recording, String> {
+        for step in 1..=5 {
+            level(f64::from(step) / 5.0);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        Ok(Recording { rate: 48_000, samples: vec![100, -100, 50] })
+    }
+
+    fn play(&self, headset: UsbId, recording: &Recording) -> Result<(), String> {
+        self.0.lock().unwrap().push((headset, recording.clone()));
+        Ok(())
+    }
+}
+
+static MIC: LazyLock<Arc<FakeMic>> = LazyLock::new(Arc::default);
+
+/// What the mic test has played back so far, and on which headset
+pub fn mic_playbacks() -> Vec<(UsbId, Recording)> {
+    MIC.0.lock().unwrap().clone()
+}
+
 /// Settings that make the app react fast enough for tests
 pub fn options(tray: bool) -> UiOptions {
     UiOptions {
@@ -197,6 +224,7 @@ pub fn options(tray: bool) -> UiOptions {
         profiles: Arc::new(JsonProfileStore::in_config_dir()),
         history: Arc::new(CsvHistoryStore::in_state_dir()),
         audio: AUDIO.clone(),
+        mic: MIC.clone(),
     }
 }
 

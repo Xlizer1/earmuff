@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use adw::prelude::*;
 use earmuff_application::{
-    AudioSystem, Autostart, Backend, HistoryStore, ManagerOptions, PreferencesStore, ProfileStore,
+    AudioSystem, Autostart, Backend, HistoryStore, ManagerOptions, MicRecorder, PreferencesStore, ProfileStore,
 };
 use earmuff_infrastructure::config::{CsvHistoryStore, JsonPreferencesStore, JsonProfileStore, XdgAutostart};
 use earmuff_infrastructure::pipewire::PipeWire;
@@ -43,6 +43,8 @@ pub struct UiOptions {
     pub history: Arc<dyn HistoryStore>,
     /// The sound system, for switching the computer's sound to a headset
     pub audio: Arc<dyn AudioSystem>,
+    /// Records from a headset's mic and plays it back, for the mic test
+    pub mic: Arc<dyn MicRecorder>,
 }
 
 impl Default for UiOptions {
@@ -58,6 +60,7 @@ impl Default for UiOptions {
             profiles: Arc::new(JsonProfileStore::in_config_dir()),
             history: Arc::new(CsvHistoryStore::in_state_dir()),
             audio: Arc::new(PipeWire::default()),
+            mic: Arc::new(PipeWire::default()),
         }
     }
 }

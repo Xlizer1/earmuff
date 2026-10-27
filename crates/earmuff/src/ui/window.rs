@@ -13,7 +13,8 @@ use std::time::Duration;
 use adw::prelude::*;
 use earmuff_application::{
     Alert, AppEvent, AudioSwitch, AudioSystem, Autostart, Backend, BatteryAlerts, BatteryHistory, DeviceManager,
-    Preferences, PreferencesStore, Profiles, Switch, time_left_text, use_headset_when_ready,
+    MIC_TEST_LENGTH, MicRecorder, Preferences, PreferencesStore, Profiles, Switch, time_left_text,
+    use_headset_when_ready,
 };
 use earmuff_domain::{DeviceId, Setting, UsbId};
 use gtk::gio;
@@ -62,6 +63,14 @@ enum Row {
     Balance(adw::ActionRow, gtk::Scale),
     Button(adw::ActionRow),
     Curve(adw::PreferencesRow, Rc<EqualizerEditor>),
+    MicTest(adw::ActionRow, gtk::LevelBar, gtk::Button),
+}
+
+/// News from a mic test running off the main thread
+enum MicTestUpdate {
+    Level(f64),
+    Playing,
+    Done(Result<(), String>),
 }
 
 /// The tabs as currently built
@@ -174,6 +183,8 @@ struct Ui {
     autostart: Arc<dyn Autostart>,
     audio: Arc<dyn AudioSystem>,
     audio_switch: RefCell<AudioSwitch>,
+    mic: Arc<dyn MicRecorder>,
+    mic_testing: Cell<bool>,
     alerts: RefCell<BatteryAlerts>,
     profiles: RefCell<Profiles>,
     history: RefCell<BatteryHistory>,
@@ -318,6 +329,8 @@ impl Ui {
             store,
             autostart: options.autostart.clone(),
             audio: options.audio.clone(),
+            mic: options.mic.clone(),
+            mic_testing: Cell::new(false),
         })
     }
 
@@ -600,6 +613,62 @@ impl Ui {
         });
     }
 
+    /// Records a few seconds from the shown headset's mic and plays them back, off the main thread
+    fn test_mic(self: &Rc<Self>) {
+        let Some(headset) = self.model.borrow().current().map(|(info, _)| info.id.usb) else { return };
+        if self.mic_testing.replace(true) {
+            return;
+        }
+        let mic = self.mic.clone();
+        let (sender, receiver) = async_channel::unbounded();
+        std::thread::spawn(move || {
+            let result = mic
+                .record(headset, MIC_TEST_LENGTH, &mut |level| {
+                    let _ = sender.send_blocking(MicTestUpdate::Level(level));
+                })
+                .and_then(|recording| {
+                    let _ = sender.send_blocking(MicTestUpdate::Playing);
+                    mic.play(headset, &recording)
+                });
+            let _ = sender.send_blocking(MicTestUpdate::Done(result));
+        });
+        self.show_mic_test(&MicTestUpdate::Level(0.0));
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            while let Ok(update) = receiver.recv().await {
+                let Some(ui) = weak.upgrade() else { break };
+                ui.show_mic_test(&update);
+            }
+        });
+    }
+
+    fn show_mic_test(self: &Rc<Self>, update: &MicTestUpdate) {
+        if let MicTestUpdate::Done(result) = update {
+            self.mic_testing.set(false);
+            if let Err(error) = result {
+                self.toasts.add_toast(adw::Toast::new(&format!("Mic test: {error}")));
+            }
+        }
+        if let Some(Row::MicTest(row, meter, button)) = self.rows.borrow().rows.get(&Control::MicTest) {
+            match update {
+                MicTestUpdate::Level(level) => {
+                    row.set_subtitle("Recording… say something");
+                    button.set_sensitive(false);
+                    meter.set_value(*level);
+                }
+                MicTestUpdate::Playing => {
+                    row.set_subtitle("Playing it back…");
+                    meter.set_value(0.0);
+                }
+                MicTestUpdate::Done(_) => meter.set_value(0.0),
+            }
+        }
+        if matches!(update, MicTestUpdate::Done(_)) {
+            // back to what the row says when no test is running
+            self.render();
+        }
+    }
+
     /// Makes a headset that just turned on the computer's sound device, off the main thread
     fn switch_audio(self: &Rc<Self>, headset: UsbId) {
         let audio = self.audio.clone();
@@ -794,6 +863,7 @@ impl Ui {
                         }
                         Row::Choice(row) => row.upcast_ref(),
                         Row::Curve(row, _) => row.upcast_ref(),
+                        Row::MicTest(row, ..) => row.upcast_ref(),
                     });
                     rows.insert(control.control, row);
                 }
@@ -837,6 +907,34 @@ impl Ui {
                 let row = adw::ActionRow::builder().name(format!("{}-row", control.name())).title(view.title).build();
                 row.add_suffix(&scale);
                 Row::Level(row, scale)
+            }
+            Widget::MicTest => {
+                let meter = gtk::LevelBar::builder()
+                    .name("mic-level")
+                    .min_value(0.0)
+                    .max_value(1.0)
+                    .width_request(140)
+                    .valign(gtk::Align::Center)
+                    .build();
+                // no "low"/"high" colors: a loud voice isn't a problem
+                for offset in [gtk::LEVEL_BAR_OFFSET_LOW, gtk::LEVEL_BAR_OFFSET_HIGH, gtk::LEVEL_BAR_OFFSET_FULL] {
+                    meter.remove_offset_value(Some(offset));
+                }
+                let button = gtk::Button::builder()
+                    .label("Test")
+                    .name(control.name())
+                    .valign(gtk::Align::Center)
+                    .css_classes(["pill"])
+                    .build();
+                button.connect_clicked(move |_| {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.test_mic();
+                    }
+                });
+                let row = adw::ActionRow::builder().name(format!("{}-row", control.name())).title(view.title).build();
+                row.add_suffix(&meter);
+                row.add_suffix(&button);
+                Row::MicTest(row, meter, button)
             }
             Widget::Curve(curve) => {
                 let editor = EqualizerEditor::new(curve, move || {
@@ -948,6 +1046,10 @@ impl Ui {
                     meter.set_value(value.map_or(64.0, f64::from));
                 }
                 (Some(Row::Button(row)), Widget::Button(_)) => row.set_sensitive(control.sensitive),
+                (Some(Row::MicTest(row, _, button)), Widget::MicTest) if !self.mic_testing.get() => {
+                    row.set_subtitle(control.subtitle.unwrap_or_default());
+                    button.set_sensitive(control.sensitive);
+                }
                 // a band still being dragged keeps where the user put it
                 (Some(Row::Curve(_, editor)), Widget::Curve(curve))
                     if !self.level_timers.borrow().contains_key(&control.control) =>

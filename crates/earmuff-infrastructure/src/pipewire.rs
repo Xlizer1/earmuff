@@ -1,10 +1,13 @@
-//! The PipeWire sound system: finds a headset's sound card with `pw-dump` and makes it
-//! the default with `wpctl` (WirePlumber), which remembers the choice.
+//! The PipeWire sound system: finds a headset's sound card with `pw-dump`, makes it the
+//! default with `wpctl` (WirePlumber, which remembers the choice), and records from its
+//! mic and plays on its speakers with `pw-record` and `pw-play`.
 
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::Duration;
 
-use earmuff_application::{AudioSystem, Switch};
+use earmuff_application::{AudioSystem, MicRecorder, Recording, Switch, meter};
 use earmuff_domain::UsbId;
 use serde_json::Value;
 
@@ -13,18 +16,47 @@ use serde_json::Value;
 pub struct PipeWire {
     dump: PathBuf,
     wpctl: PathBuf,
+    record: PathBuf,
+    play: PathBuf,
 }
 
 impl Default for PipeWire {
     fn default() -> Self {
-        PipeWire::with_programs("pw-dump", "wpctl")
+        PipeWire::with_programs("pw-dump", "wpctl").with_recorder("pw-record", "pw-play")
     }
 }
+
+/// The rate mic tests record at
+const RATE: u32 = 48_000;
+/// How much sound goes into one reading of the level meter
+const METER_EVERY: Duration = Duration::from_millis(50);
 
 impl PipeWire {
     /// Other programs in place of `pw-dump` and `wpctl`, e.g. scripted ones for tests
     pub fn with_programs(dump: impl AsRef<Path>, wpctl: impl AsRef<Path>) -> Self {
-        PipeWire { dump: dump.as_ref().to_path_buf(), wpctl: wpctl.as_ref().to_path_buf() }
+        let (dump, wpctl) = (dump.as_ref().to_path_buf(), wpctl.as_ref().to_path_buf());
+        PipeWire { dump, wpctl, record: "pw-record".into(), play: "pw-play".into() }
+    }
+
+    /// Other programs in place of `pw-record` and `pw-play`
+    pub fn with_recorder(mut self, record: impl AsRef<Path>, play: impl AsRef<Path>) -> Self {
+        (self.record, self.play) = (record.as_ref().to_path_buf(), play.as_ref().to_path_buf());
+        self
+    }
+
+    fn graph(&self, headset: UsbId) -> Result<Graph, String> {
+        let output = Command::new(&self.dump).output().map_err(|error| format!("couldn't run pw-dump: {error}"))?;
+        if !output.status.success() {
+            return Err("pw-dump failed; is PipeWire running?".into());
+        }
+        parse(&String::from_utf8_lossy(&output.stdout), headset)
+    }
+
+    /// The raw-sound arguments pw-record and pw-play share
+    fn raw_args(rate: u32, target: &str) -> Vec<String> {
+        ["--raw", "--format", "s16", "--channels", "1", "--rate", &rate.to_string(), "--target", target]
+            .map(String::from)
+            .to_vec()
     }
 
     fn set_default(&self, node: &Node) -> Result<(), String> {
@@ -46,11 +78,7 @@ impl PipeWire {
 
 impl AudioSystem for PipeWire {
     fn use_headset(&self, headset: UsbId) -> Result<Switch, String> {
-        let output = Command::new(&self.dump).output().map_err(|error| format!("couldn't run pw-dump: {error}"))?;
-        if !output.status.success() {
-            return Err("pw-dump failed; is PipeWire running?".into());
-        }
-        let graph = parse(&String::from_utf8_lossy(&output.stdout), headset)?;
+        let graph = self.graph(headset)?;
         let Some(sink) = &graph.sink else { return Ok(Switch::NotFound) };
         let mut switched = false;
         if graph.default_sink.as_deref() != Some(&sink.name) {
@@ -65,6 +93,62 @@ impl AudioSystem for PipeWire {
         }
         Ok(if switched { Switch::Switched(sink.description.clone()) } else { Switch::Already })
     }
+}
+
+impl MicRecorder for PipeWire {
+    fn record(&self, headset: UsbId, duration: Duration, level: &mut dyn FnMut(f64)) -> Result<Recording, String> {
+        let source = self.graph(headset)?.source.ok_or("the computer has no mic for this headset")?;
+        let frames = (duration.as_secs_f64() * f64::from(RATE)).round() as u64;
+        let mut child = Command::new(&self.record)
+            .args(PipeWire::raw_args(RATE, &source.name))
+            .args(["--media-category", "Capture", "--sample-count", &frames.to_string(), "-"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| format!("couldn't run pw-record: {error}"))?;
+        let mut stdout = child.stdout.take().ok_or("pw-record has no output")?;
+        let chunk_bytes = (METER_EVERY.as_secs_f64() * f64::from(RATE)) as usize * 2;
+        let (mut bytes, mut buffer) = (Vec::new(), vec![0; chunk_bytes]);
+        loop {
+            let read = stdout.read(&mut buffer).map_err(|error| format!("couldn't read the recording: {error}"))?;
+            if read == 0 {
+                break;
+            }
+            let start = bytes.len() - bytes.len() % 2;
+            bytes.extend_from_slice(&buffer[..read]);
+            level(meter(&samples(&bytes[start..])));
+        }
+        let output = child.wait_with_output().map_err(|error| format!("pw-record failed: {error}"))?;
+        if !output.status.success() && bytes.is_empty() {
+            return Err(format!("couldn't record: {}", String::from_utf8_lossy(&output.stderr).trim()));
+        }
+        Ok(Recording { rate: RATE, samples: samples(&bytes) })
+    }
+
+    fn play(&self, headset: UsbId, recording: &Recording) -> Result<(), String> {
+        let sink = self.graph(headset)?.sink.ok_or("the computer has no speakers for this headset")?;
+        let mut child = Command::new(&self.play)
+            .args(PipeWire::raw_args(recording.rate, &sink.name))
+            .arg("-")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| format!("couldn't run pw-play: {error}"))?;
+        let bytes: Vec<u8> = recording.samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+        let written = child.stdin.take().ok_or("pw-play takes no input")?.write_all(&bytes);
+        let output = child.wait_with_output().map_err(|error| format!("pw-play failed: {error}"))?;
+        match (written, output.status.success()) {
+            (Ok(()), true) => Ok(()),
+            _ => Err(format!("couldn't play it back: {}", String::from_utf8_lossy(&output.stderr).trim())),
+        }
+    }
+}
+
+/// Little-endian 16-bit samples; a byte left over is dropped
+fn samples(bytes: &[u8]) -> Vec<i16> {
+    bytes.chunks_exact(2).map(|pair| i16::from_le_bytes([pair[0], pair[1]])).collect()
 }
 
 /// A sink (speakers) or source (mic)
@@ -208,6 +292,11 @@ mod tests {
         assert_eq!(graph.sink.map(|n| n.name), Some("game".into()));
         assert_eq!(graph.default_sink.as_deref(), Some("game"));
         assert_eq!(graph.source, None);
+    }
+
+    #[test]
+    fn samples_are_little_endian() {
+        assert_eq!(samples(&[0x01, 0x00, 0xFF, 0xFF, 0x00, 0x80, 0x07]), [1, -1, i16::MIN]);
     }
 
     #[test]

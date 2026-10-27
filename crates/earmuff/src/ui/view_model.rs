@@ -105,6 +105,7 @@ pub enum Control {
     BtWhenPoweredOn,
     BtCallVolume,
     NotificationSound,
+    MicTest,
     Model,
     UsbId,
     Connection,
@@ -132,6 +133,7 @@ impl Control {
             Control::BtWhenPoweredOn => "bluetooth-on-power",
             Control::BtCallVolume => "bluetooth-call-volume",
             Control::NotificationSound => "notification-sound",
+            Control::MicTest => "mic-test",
             Control::Model => "model",
             Control::UsbId => "usb-id",
             Control::Connection => "connection",
@@ -156,6 +158,8 @@ pub enum Widget {
     Button(&'static str),
     /// An equalizer curve to shape band by band
     Curve(CurveView),
+    /// Records a few seconds from the mic and plays them back, with a level meter
+    MicTest,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -577,6 +581,21 @@ fn sections(info: &DeviceInfo, s: &Status) -> Vec<SectionView> {
         ],
     );
 
+    // any headset with a sound card can be tested, whatever else its mic can do
+    let muted = s.mic_muted == Some(true);
+    add(
+        Tab::Microphone,
+        "Mic test",
+        None,
+        vec![Some(ControlView {
+            control: Control::MicTest,
+            title: "Test your mic",
+            subtitle: Some(if muted { "Unmute the mic first" } else { "Records five seconds, then plays them back" }),
+            widget: Widget::MicTest,
+            sensitive: !muted,
+        })],
+    );
+
     let sidetone_on = s.sidetone.unwrap_or(false);
     add(
         Tab::Audio,
@@ -825,13 +844,14 @@ mod tests {
         let model = model_with(&CLOUD_ALPHA, vec![Event::Connected(true), Event::Sidetone(false)]);
         let view = model.view().unwrap();
         let titles: Vec<&str> = view.sections.iter().map(|s| s.title).collect();
-        assert_eq!(titles, ["Microphone", "Mic monitoring", "Power and sounds", "About this headset"]);
+        assert_eq!(titles, ["Microphone", "Mic test", "Mic monitoring", "Power and sounds", "About this headset"]);
         let controls: Vec<Control> = view.layout().iter().map(|(c, _)| *c).collect();
         assert_eq!(
             controls,
             [
                 Control::Mute,
                 Control::MicAttached,
+                Control::MicTest,
                 Control::Sidetone,
                 Control::SidetoneLevel,
                 Control::AutoOff,
@@ -850,6 +870,17 @@ mod tests {
         );
         assert!(view.has_battery);
         assert_eq!(view.tabs(), [Tab::Audio, Tab::Microphone, Tab::Power]);
+    }
+
+    #[test]
+    fn the_mic_test_waits_for_an_unmuted_mic() {
+        let test = |muted| {
+            let model = model_with(&CLOUD_ALPHA, vec![Event::Connected(true), Event::MicMuted(muted)]);
+            let control = model.view().unwrap().control(Control::MicTest).cloned().unwrap();
+            (control.sensitive, control.subtitle.unwrap())
+        };
+        assert_eq!(test(false), (true, "Records five seconds, then plays them back"));
+        assert_eq!(test(true), (false, "Unmute the mic first"));
     }
 
     #[test]

@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use adw::prelude::*;
 use earmuff_application::Backend;
-use earmuff_domain::{Gain, NoiseFilter, Percent};
+use earmuff_domain::{Gain, NoiseFilter, Percent, UsbId};
 use earmuff_infrastructure::demo::{DemoBackend, DemoHeadset, FULL_DEMO_USB, FullHeadset};
 use support::{Outcome, ensure, find, page, run_app, until, window};
 use zbus::zvariant::OwnedValue;
@@ -192,6 +192,9 @@ async fn scenario(
     // the mute switch mutes the headset
     mute.set_active(true);
     until("the headset to mute", || headset.with(|sim, _| sim.muted)).await?;
+    // a muted mic can't be tested
+    let mic_test: gtk::Button = find(&window, "mic-test")?;
+    until("the mic test to wait for the mic", || !mic_test.is_sensitive()).await?;
 
     // the mute button on the headset flips the switch
     headset.with(|sim, now| sim.press_mute_button(now));
@@ -229,6 +232,15 @@ async fn scenario(
     let connection: adw::ActionRow = find(&window, "connection")?;
     ensure(usb.subtitle().as_deref() == Some("03f0:098d"), "shows the USB ID")?;
     ensure(connection.subtitle().as_deref() == Some("Simulated (demo)"), "shows how it's connected")?;
+
+    // the mic test records a few seconds, with a level meter, and plays them back on the same headset
+    let mic_level: gtk::LevelBar = find(&window, "mic-level")?;
+    ensure(mic_test.is_sensitive(), "the unmuted mic can be tested")?;
+    mic_test.emit_clicked();
+    until("the level meter to move", || mic_level.value() > 0.0).await?;
+    until("the recording to play back", || support::mic_playbacks().len() == 1).await?;
+    ensure(support::mic_playbacks()[0].0 == UsbId::new(0x03F0, 0x098D), "played back on the Cloud Alpha")?;
+    until("the mic test to finish", || mic_test.is_sensitive() && mic_level.value() == 0.0).await?;
 
     // the sidebar switches to the demo headset with every feature
     let list: gtk::ListBox = find(&window, "device-list")?;
