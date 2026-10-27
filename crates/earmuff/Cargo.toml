@@ -1,0 +1,21 @@
+[package]
+name = "earmuff"
+description = "Battery and settings for the HyperX Cloud Alpha Wireless"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+adw.workspace = true
+async-channel.workspace = true
+clap.workspace = true
+glib-unix.workspace = true
+gtk.workspace = true
+ksni.workspace = true
+libc.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
