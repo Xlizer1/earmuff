@@ -5,11 +5,24 @@
 pub struct Preferences {
     /// The accent color's name, e.g. "red"
     pub accent: String,
+    /// Battery percentage that triggers a warning (and half of it a second one); 0 is off
+    pub battery_alert: u8,
+    /// Say when a charging headset is full
+    pub notify_charged: bool,
+}
+
+impl Preferences {
+    pub fn alerts(&self) -> crate::AlertSettings {
+        crate::AlertSettings {
+            low_at: (self.battery_alert > 0).then_some(self.battery_alert),
+            when_charged: self.notify_charged,
+        }
+    }
 }
 
 impl Default for Preferences {
     fn default() -> Self {
-        Preferences { accent: "red".into() }
+        Preferences { accent: "red".into(), battery_alert: 20, notify_charged: true }
     }
 }
 
@@ -35,5 +48,12 @@ mod tests {
     #[test]
     fn red_is_the_default_accent() {
         assert_eq!(Preferences::default().accent, "red");
+    }
+
+    #[test]
+    fn alert_preferences_become_alert_settings() {
+        assert_eq!(Preferences::default().alerts(), crate::AlertSettings { low_at: Some(20), when_charged: true });
+        let off = Preferences { battery_alert: 0, notify_charged: false, ..Preferences::default() };
+        assert_eq!(off.alerts(), crate::AlertSettings { low_at: None, when_charged: false });
     }
 }

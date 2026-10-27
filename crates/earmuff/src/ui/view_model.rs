@@ -20,6 +20,30 @@ pub fn accent_class(name: &str) -> Option<String> {
     (name != "red" && ACCENTS.iter().any(|(known, _)| *known == name)).then(|| format!("accent-{name}"))
 }
 
+/// The low-battery warning levels offered in Preferences; 0 is off
+pub const BATTERY_ALERTS: [u8; 5] = [0, 10, 15, 20, 30];
+
+pub fn battery_alert_label(level: u8) -> String {
+    if level == 0 { "Off".into() } else { format!("At {level}%") }
+}
+
+/// Where a warning level sits in the Preferences list (other levels show as the nearest)
+pub fn battery_alert_index(level: u8) -> u32 {
+    BATTERY_ALERTS.iter().enumerate().min_by_key(|(_, l)| l.abs_diff(level)).map_or(0, |(i, _)| i as u32)
+}
+
+/// What a battery alert says: title and body
+pub fn alert_text(alert: &earmuff_application::Alert) -> (String, String) {
+    use earmuff_application::Alert;
+    match alert {
+        Alert::Low { name, level, .. } => ("Headset battery low".into(), format!("{name}: {level}% left")),
+        Alert::Critical { name, level, .. } => {
+            ("Headset battery almost empty".into(), format!("{name}: {level}% left. Charge it soon."))
+        }
+        Alert::Charged { name, .. } => ("Headset charged".into(), format!("{name} is fully charged.")),
+    }
+}
+
 /// What to tell users whose desktop doesn't run autostart entries
 pub fn autostart_hint(desktop: &str) -> Option<&'static str> {
     let desktop = desktop.to_ascii_lowercase();
@@ -797,6 +821,25 @@ mod tests {
         assert_eq!((view.battery, view.battery_text.as_str()), (Some(99), "99%"));
         assert_eq!((view.charge_text.as_str(), view.subtitle.as_str()), ("Charging", "Black/Red"));
         assert_eq!(view.detail, "HyperX · Black/Red");
+    }
+
+    #[test]
+    fn battery_alert_choices() {
+        assert_eq!(battery_alert_label(0), "Off");
+        assert_eq!(battery_alert_label(20), "At 20%");
+        assert_eq!(battery_alert_index(20), 3);
+        assert_eq!(battery_alert_index(0), 0);
+        assert_eq!(battery_alert_index(25), 3); // nearest offered level
+    }
+
+    #[test]
+    fn alerts_read_naturally() {
+        use earmuff_application::Alert;
+        let device = alpha("a").id;
+        let low = Alert::Low { device: device.clone(), name: "Cloud Alpha".into(), level: 18 };
+        assert_eq!(alert_text(&low), ("Headset battery low".into(), "Cloud Alpha: 18% left".into()));
+        let charged = Alert::Charged { device, name: "Cloud Alpha".into() };
+        assert_eq!(alert_text(&charged).1, "Cloud Alpha is fully charged.");
     }
 
     #[test]

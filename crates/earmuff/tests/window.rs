@@ -3,26 +3,93 @@
 
 mod support;
 
+use std::collections::HashMap;
 use std::process::ExitCode;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use adw::prelude::*;
 use earmuff_application::Backend;
 use earmuff_domain::{NoiseFilter, Percent};
 use earmuff_infrastructure::demo::{DemoBackend, DemoHeadset, FullHeadset};
 use support::{Outcome, ensure, find, page, run_app, until, window};
+use zbus::zvariant::OwnedValue;
+
+/// Stands in for the desktop's notification server and records each title. GLib may
+/// use either the freedesktop or the GTK protocol, so it speaks both.
+#[derive(Clone, Default)]
+struct Notifications {
+    titles: Arc<Mutex<Vec<String>>>,
+}
+
+#[zbus::interface(name = "org.freedesktop.Notifications")]
+impl Notifications {
+    #[allow(clippy::too_many_arguments)]
+    fn notify(
+        &self,
+        _app: String,
+        _replaces: u32,
+        _icon: String,
+        summary: String,
+        _body: String,
+        _actions: Vec<String>,
+        _hints: HashMap<String, OwnedValue>,
+        _timeout: i32,
+    ) -> u32 {
+        self.titles.lock().unwrap().push(summary);
+        1
+    }
+
+    fn get_capabilities(&self) -> Vec<String> {
+        vec!["body".into()]
+    }
+
+    fn get_server_information(&self) -> (String, String, String, String) {
+        ("fake".into(), "earmuff tests".into(), "1".into(), "1.2".into())
+    }
+
+    fn close_notification(&self, _id: u32) {}
+}
+
+#[derive(Clone)]
+struct GtkNotifications(Notifications);
+
+#[zbus::interface(name = "org.gtk.Notifications")]
+impl GtkNotifications {
+    fn add_notification(&self, _app: String, _id: String, notification: HashMap<String, OwnedValue>) {
+        let title = notification.get("title").and_then(|v| String::try_from(v.try_clone().ok()?).ok());
+        self.0.titles.lock().unwrap().push(title.unwrap_or_default());
+    }
+
+    fn remove_notification(&self, _app: String, _id: String) {}
+}
 
 fn main() -> ExitCode {
     support::isolated("window", || {
+        let notifications = Notifications::default();
+        let _server = zbus::block_on(async {
+            zbus::connection::Builder::session()?
+                .name("org.freedesktop.Notifications")?
+                .name("org.gtk.Notifications")?
+                .serve_at("/org/freedesktop/Notifications", notifications.clone())?
+                .serve_at("/org/gtk/Notifications", GtkNotifications(notifications.clone()))?
+                .build()
+                .await
+        })
+        .map_err(|e| format!("fake notification server: {e}"))?;
         let demo = DemoBackend::new();
         let headset = demo.headsets()[0].clone();
         let other = demo.full_headset().clone();
         let backends: Vec<Arc<dyn Backend>> = vec![Arc::new(demo)];
-        run_app(backends, false, move |app| scenario(app, headset, other))
+        run_app(backends, false, move |app| scenario(app, headset, other, notifications))
     })
 }
 
-async fn scenario(app: adw::Application, headset: DemoHeadset, other: FullHeadset) -> Outcome {
+async fn scenario(
+    app: adw::Application,
+    headset: DemoHeadset,
+    other: FullHeadset,
+    notifications: Notifications,
+) -> Outcome {
     let window = window(&app).await?;
     let title: adw::WindowTitle = find(&window, "title")?;
     let battery: gtk::Label = find(&window, "battery-label")?;
@@ -123,6 +190,11 @@ async fn scenario(app: adw::Application, headset: DemoHeadset, other: FullHeadse
     // battery news from the headset
     headset.with(|sim, now| sim.set_battery(15, now));
     until("the new battery level", || battery.label() == "15%").await?;
+    // at 15% it's below the default 20% mark: a desktop notification says so
+    until("the low-battery notification", || {
+        notifications.titles.lock().unwrap().iter().any(|title| title == "Headset battery low")
+    })
+    .await?;
 
     // only the controls the headset has: the Cloud Alpha has no lights
     ensure(find::<adw::SwitchRow>(&window, "lights").is_err(), "no lights control on the Cloud Alpha")?;

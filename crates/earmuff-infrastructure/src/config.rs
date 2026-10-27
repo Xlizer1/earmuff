@@ -65,12 +65,24 @@ impl PreferencesStore for JsonPreferencesStore {
         let saved = self.read();
         let defaults = Preferences::default();
         let text = |key: &str, default: String| saved.get(key).and_then(Value::as_str).map_or(default, String::from);
-        Preferences { accent: text("accent", defaults.accent) }
+        let flag = |key: &str, default: bool| saved.get(key).and_then(Value::as_bool).unwrap_or(default);
+        let number = |key: &str, default: u8| {
+            saved.get(key).and_then(Value::as_u64).and_then(|n| u8::try_from(n).ok()).unwrap_or(default)
+        };
+        Preferences {
+            accent: text("accent", defaults.accent),
+            battery_alert: number("battery_alert", defaults.battery_alert).min(100),
+            notify_charged: flag("notify_charged", defaults.notify_charged),
+        }
     }
 
     fn save(&self, preferences: &Preferences) -> Result<(), String> {
         let mut saved = self.read();
-        let current = json!({ "accent": preferences.accent });
+        let current = json!({
+            "accent": preferences.accent,
+            "battery_alert": preferences.battery_alert,
+            "notify_charged": preferences.notify_charged,
+        });
         saved.extend(current.as_object().cloned().unwrap_or_default());
         let text = serde_json::to_string_pretty(&Value::Object(saved)).map_err(|e| e.to_string())?;
         write_atomically(&self.path, text.as_bytes()).map_err(|e| format!("{}: {e}", self.path.display()))
@@ -143,8 +155,9 @@ mod tests {
     #[test]
     fn saves_and_loads() {
         let (_dir, store) = store();
-        store.save(&Preferences { accent: "cyan".into() }).unwrap();
-        assert_eq!(store.load().accent, "cyan");
+        let saved = Preferences { accent: "cyan".into(), battery_alert: 15, notify_charged: false };
+        store.save(&saved).unwrap();
+        assert_eq!(store.load(), saved);
     }
 
     #[test]

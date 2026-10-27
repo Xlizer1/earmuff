@@ -11,7 +11,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use adw::prelude::*;
-use earmuff_application::{AppEvent, Autostart, Backend, DeviceManager, Preferences, PreferencesStore};
+use earmuff_application::{
+    Alert, AppEvent, Autostart, Backend, BatteryAlerts, DeviceManager, Preferences, PreferencesStore,
+};
 use earmuff_domain::{DeviceId, Setting};
 use gtk::gio;
 use gtk::glib::{self, SourceId};
@@ -19,8 +21,8 @@ use ksni::TrayMethods;
 
 use super::battery_ring::BatteryRing;
 use super::view_model::{
-    ACCENTS, Control, ControlView, DeviceView, Input, Model, Page, SidebarItem, Widget, accent_class, accent_index,
-    autostart_hint,
+    ACCENTS, BATTERY_ALERTS, Control, ControlView, DeviceView, Input, Model, Page, SidebarItem, Widget, accent_class,
+    accent_index, alert_text, autostart_hint, battery_alert_index, battery_alert_label,
 };
 use super::{APP_ID, RESOURCE_PATH, UiOptions};
 use crate::tray::{HeadsetTray, TrayEvent, TrayState};
@@ -150,6 +152,7 @@ struct Ui {
     preferences: RefCell<Preferences>,
     store: Arc<dyn PreferencesStore>,
     autostart: Arc<dyn Autostart>,
+    alerts: RefCell<BatteryAlerts>,
 }
 
 impl Ui {
@@ -278,6 +281,7 @@ impl Ui {
             tray: RefCell::new(None),
             tray_online: Cell::new(false),
             hold: RefCell::new(None),
+            alerts: RefCell::new(BatteryAlerts::new(store.load().alerts())),
             preferences: RefCell::new(store.load()),
             store,
             autostart,
@@ -287,8 +291,10 @@ impl Ui {
     // --- app actions and preferences --------------------------------------
 
     fn install_actions(self: &Rc<Self>) {
-        let actions: [AppAction; 4] = [
+        let actions: [AppAction; 5] = [
             ("preferences", "<Control>comma", Ui::show_preferences),
+            // what clicking a notification does
+            ("show", "", |ui| ui.window.present()),
             ("about", "F1", Ui::show_about),
             // closing hides the window when there's a tray icon
             ("close", "<Control>w", |ui| ui.window.close()),
@@ -303,7 +309,9 @@ impl Ui {
                 }
             });
             self.app.add_action(&action);
-            self.app.set_accels_for_action(&format!("app.{name}"), &[accel]);
+            if !accel.is_empty() {
+                self.app.set_accels_for_action(&format!("app.{name}"), &[accel]);
+            }
         }
     }
 
@@ -342,8 +350,38 @@ impl Ui {
         startup.set_description(autostart_hint(&std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default()));
         startup.add(&login);
 
+        let alert_labels: Vec<String> = BATTERY_ALERTS.iter().map(|level| battery_alert_label(*level)).collect();
+        let alert_labels: Vec<&str> = alert_labels.iter().map(String::as_str).collect();
+        let low = adw::ComboRow::builder()
+            .name("battery-alert")
+            .title("Warn when the battery is low")
+            .model(&gtk::StringList::new(&alert_labels))
+            .selected(battery_alert_index(self.preferences.borrow().battery_alert))
+            .build();
+        let weak = Rc::downgrade(self);
+        low.connect_selected_notify(move |row| {
+            if let (Some(ui), Some(level)) = (weak.upgrade(), BATTERY_ALERTS.get(row.selected() as usize)) {
+                ui.update_preferences(|preferences| preferences.battery_alert = *level);
+            }
+        });
+        let charged = adw::SwitchRow::builder()
+            .name("notify-charged")
+            .title("Say when it's fully charged")
+            .active(self.preferences.borrow().notify_charged)
+            .build();
+        let weak = Rc::downgrade(self);
+        charged.connect_active_notify(move |row| {
+            if let Some(ui) = weak.upgrade() {
+                ui.update_preferences(|preferences| preferences.notify_charged = row.is_active());
+            }
+        });
+        let notifications = adw::PreferencesGroup::builder().title("Notifications").build();
+        notifications.add(&low);
+        notifications.add(&charged);
+
         let page = adw::PreferencesPage::builder().title("General").icon_name("preferences-system-symbolic").build();
         page.add(&appearance);
+        page.add(&notifications);
         page.add(&startup);
         let dialog = adw::PreferencesDialog::builder().name("preferences").build();
         dialog.add(&page);
@@ -372,9 +410,10 @@ impl Ui {
         about.present(Some(&self.window));
     }
 
-    /// Changes the preferences and saves them
+    /// Changes the preferences, saves them, and passes on what other parts need
     fn update_preferences(&self, change: impl FnOnce(&mut Preferences)) {
         change(&mut self.preferences.borrow_mut());
+        self.alerts.borrow_mut().set_settings(self.preferences.borrow().alerts());
         if let Err(error) = self.store.save(&self.preferences.borrow()) {
             self.toasts.add_toast(adw::Toast::new(&format!("Couldn't save preferences: {error}")));
         }
@@ -476,8 +515,30 @@ impl Ui {
                 if let Some(reason) = failure {
                     ui.toasts.add_toast(adw::Toast::new(&reason));
                 }
+                let alerts = ui.alerts.borrow_mut().on_event(&event);
+                for alert in alerts {
+                    ui.notify(&alert);
+                }
             }
         });
+    }
+
+    /// Shows a battery alert as a desktop notification
+    fn notify(&self, alert: &Alert) {
+        let (title, body) = alert_text(alert);
+        let notification = gio::Notification::new(&title);
+        notification.set_body(Some(&body));
+        notification.set_icon(&gio::ThemedIcon::new(APP_ID));
+        notification.set_default_action("app.show");
+        let device = match alert {
+            Alert::Critical { device, .. } => {
+                notification.set_priority(gio::NotificationPriority::High);
+                device
+            }
+            Alert::Low { device, .. } | Alert::Charged { device, .. } => device,
+        };
+        // one notification per headset: a newer alert replaces the older one
+        self.app.send_notification(Some(&format!("battery-{}", device.usb)), &notification);
     }
 
     fn render(self: &Rc<Self>) {

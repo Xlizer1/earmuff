@@ -4,6 +4,7 @@
 //! the outside: infrastructure implements [`Backend`] and [`Session`], and the
 //! presentation layer drives the use cases and the [`DeviceManager`].
 
+mod alerts;
 mod manager;
 mod ports;
 mod preferences;
@@ -12,6 +13,7 @@ mod usecases;
 #[cfg(test)]
 mod testing;
 
+pub use alerts::{Alert, AlertSettings, BatteryAlerts};
 pub use manager::{AppEvent, DeviceManager, ManagerOptions};
 pub use ports::{Backend, BackendError, Session, SessionError, Waker};
 pub use preferences::{Autostart, Preferences, PreferencesStore};
