@@ -1,0 +1,17 @@
+[package]
+name = "earmuff-infrastructure"
+description = "Earmuff's adapters: hidraw access, headset backends and simulated headsets"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+earmuff-application.workspace = true
+earmuff-domain.workspace = true
+earmuff-protocols.workspace = true
+rustix.workspace = true
+
+[lints]
+workspace = true

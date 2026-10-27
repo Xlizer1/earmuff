@@ -364,6 +364,16 @@ name = "earmuff-domain"
 version = "0.1.0"
 
 [[package]]
+name = "earmuff-infrastructure"
+version = "0.1.0"
+dependencies = [
+ "earmuff-application",
+ "earmuff-domain",
+ "earmuff-protocols",
+ "rustix",
+]
+
+[[package]]
 name = "earmuff-protocols"
 version = "0.1.0"
 dependencies = [
