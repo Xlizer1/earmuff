@@ -1,0 +1,14 @@
+[package]
+name = "earmuff-protocols"
+description = "Byte-level protocols of the headsets Earmuff drives natively"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+earmuff-domain.workspace = true
+
+[lints]
+workspace = true

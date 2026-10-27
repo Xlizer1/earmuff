@@ -357,6 +357,13 @@ name = "earmuff-domain"
 version = "0.1.0"
 
 [[package]]
+name = "earmuff-protocols"
+version = "0.1.0"
+dependencies = [
+ "earmuff-domain",
+]
+
+[[package]]
 name = "endi"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
