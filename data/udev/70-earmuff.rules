@@ -1,0 +1,5 @@
+# Lets the logged-in user open the USB dongles of headsets Earmuff drives natively.
+# Installed by `make install-udev`.
+
+# HyperX Cloud Alpha Wireless
+KERNEL=="hidraw*", ATTRS{idVendor}=="03f0", ATTRS{idProduct}=="098d", TAG+="uaccess"
