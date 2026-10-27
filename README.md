@@ -25,7 +25,16 @@ Run `earmuff`, or open "Earmuff" from the app menu. It shows what your headset h
 - equalizer presets, ChatMix, volume limiter and lights
 - auto power-off, voice prompts and the Bluetooth options
 
-With several headsets connected, a picker in the header switches between them.
+The window has a dark gaming look: a sidebar with every connected headset, a banner
+with the headset's battery ring, and a tab per kind of setting. Pick the accent color
+(red, cyan, green, purple or orange) in Preferences.
+
+| Shortcut | Does |
+|---|---|
+| Ctrl+, | Preferences |
+| F1 | About |
+| Ctrl+W | Close the window (Earmuff stays in the tray) |
+| Ctrl+Q | Quit |
 
 Earmuff puts a headset icon in the system tray (Waybar's tray, KDE, or GNOME with the
 AppIndicator extension). Hover it for the battery; right-click for mic mute, Open and
