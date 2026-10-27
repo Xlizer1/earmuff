@@ -18,5 +18,17 @@ gtk.workspace = true
 ksni.workspace = true
 serde_json.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+zbus.workspace = true
+
+[[test]]
+name = "window"
+harness = false
+
+[[test]]
+name = "tray"
+harness = false
+
 [lints]
 workspace = true
