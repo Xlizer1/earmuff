@@ -42,6 +42,16 @@ window.accent-orange {
   --accent-color: #ff9d42;
 }
 
+/* Headings, the banner's name and the badges are written in sentence case and only
+   shown in capitals, so screen readers read them as words */
+preferencesgroup label.heading,
+.hero-name,
+.badge,
+.ring-state,
+.sidebar-heading {
+  text-transform: uppercase;
+}
+
 /* group headings: bold and spaced, like a game menu */
 preferencesgroup label.heading {
   font-weight: 800;

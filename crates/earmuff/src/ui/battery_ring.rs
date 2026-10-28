@@ -61,7 +61,7 @@ impl BatteryRing {
     /// Shows a battery reading; the ring eases to the new level
     pub fn show(&self, level: Option<u8>, text: &str, state: &str, low: bool, charging: bool) {
         self.percent.set_label(if text.is_empty() { "–" } else { text });
-        self.state.set_label(&state.to_uppercase());
+        self.state.set_label(state);
         for (class, on) in [("low", low), ("charging", charging)] {
             if on {
                 self.area.add_css_class(class);

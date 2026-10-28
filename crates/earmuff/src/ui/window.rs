@@ -140,10 +140,10 @@ impl Hero {
     fn show(&self, view: &DeviceView, time_left: Option<String>) {
         self.time_left.set_visible(time_left.is_some());
         self.time_left.set_label(&time_left.unwrap_or_default());
-        self.name.set_label(&view.title.to_uppercase());
+        self.name.set_label(&view.title);
         self.detail.set_label(&view.detail);
         self.badge.set_label(view.badge);
-        for (class, on) in [("charging", view.charging), ("off", view.badge == "OFF")] {
+        for (class, on) in [("charging", view.charging), ("off", view.badge == "Off")] {
             if on {
                 self.badge.add_css_class(class);
             } else {
@@ -208,7 +208,7 @@ impl Ui {
             .show_end_title_buttons(false)
             .title_widget(&gtk::Box::new(gtk::Orientation::Horizontal, 0))
             .build();
-        sidebar_header.pack_start(&gtk::Label::builder().label("HEADSETS").css_classes(["sidebar-heading"]).build());
+        sidebar_header.pack_start(&gtk::Label::builder().label("Headsets").css_classes(["sidebar-heading"]).build());
         let sidebar = adw::ToolbarView::builder()
             .content(&gtk::ScrolledWindow::builder().child(&device_list).vexpand(true).build())
             .build();
@@ -836,7 +836,7 @@ impl Ui {
         graph.widget.set_margin_bottom(6);
         graph.widget.set_margin_start(12);
         graph.widget.set_margin_end(12);
-        let group = adw::PreferencesGroup::builder().title("BATTERY HISTORY").build();
+        let group = adw::PreferencesGroup::builder().title("Battery history").build();
         group.set_header_suffix(Some(&buttons));
         group.add(&card);
         group
@@ -909,7 +909,7 @@ impl Ui {
                 page.append(&self.battery_history_group(graph));
             }
             for section in view.sections.iter().filter(|section| section.tab == tab) {
-                let group = adw::PreferencesGroup::builder().title(section.title.to_uppercase()).build();
+                let group = adw::PreferencesGroup::builder().title(section.title).build();
                 group.set_description(section.description);
                 for control in &section.controls {
                     let row = self.build_row(control);

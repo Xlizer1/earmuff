@@ -458,11 +458,11 @@ impl Model {
             subtitle: s.color.clone().unwrap_or_default(),
             detail,
             badge: match (s.connected, s.charge) {
-                (Some(true), Some(ChargeState::Full)) => "FULLY CHARGED",
-                (Some(true), Some(ChargeState::Charging)) => "CHARGING",
-                (Some(true), _) => "CONNECTED",
-                (Some(false), _) => "OFF",
-                (None, _) => "CONNECTING",
+                (Some(true), Some(ChargeState::Full)) => "Fully charged",
+                (Some(true), Some(ChargeState::Charging)) => "Charging",
+                (Some(true), _) => "Connected",
+                (Some(false), _) => "Off",
+                (None, _) => "Connecting",
             },
             charging,
             has_battery: info.supports(Capability::Battery),
@@ -1077,16 +1077,16 @@ mod tests {
             ],
         );
         let view = on_battery.view().unwrap();
-        assert_eq!((view.badge, view.charging, view.battery_low), ("CONNECTED", false, true));
+        assert_eq!((view.badge, view.charging, view.battery_low), ("Connected", false, true));
         let charging = model_with(
             &CLOUD_ALPHA,
             vec![Event::Connected(true), Event::Battery(Percent::saturating(12)), Event::Charge(ChargeState::Charging)],
         );
         let view = charging.view().unwrap();
         // a charging headset isn't low on battery
-        assert_eq!((view.badge, view.charging, view.battery_low), ("CHARGING", true, false));
+        assert_eq!((view.badge, view.charging, view.battery_low), ("Charging", true, false));
         let full = model_with(&CLOUD_ALPHA, vec![Event::Connected(true), Event::Charge(ChargeState::Full)]);
-        assert_eq!(full.view().unwrap().badge, "FULLY CHARGED");
+        assert_eq!(full.view().unwrap().badge, "Fully charged");
     }
 
     #[test]

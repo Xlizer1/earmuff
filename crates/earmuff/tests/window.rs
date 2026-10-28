@@ -126,8 +126,8 @@ async fn scenario(
     // the banner shows the headset, its state and battery
     let hero_name: gtk::Label = find(&window, "hero-name")?;
     let badge: gtk::Label = find(&window, "badge")?;
-    ensure(hero_name.label() == "CLOUD ALPHA WIRELESS (DEMO)", format!("banner says {}", hero_name.label()))?;
-    ensure(badge.label() == "CONNECTED", format!("badge says {}", badge.label()))?;
+    ensure(hero_name.label() == "Cloud Alpha Wireless (demo)", format!("banner says {}", hero_name.label()))?;
+    ensure(badge.label() == "Connected", format!("badge says {}", badge.label()))?;
 
     // the battery history gives a time-left estimate and a graph on the Power tab
     let time_left: gtk::Label = find(&window, "time-left")?;
@@ -137,9 +137,9 @@ async fn scenario(
     find::<gtk::ToggleButton>(&window, "history-week")?.set_active(true);
     find::<gtk::ToggleButton>(&window, "history-day")?.set_active(true);
     headset.with(|sim, now| sim.set_charging(1, now));
-    until("the charging badge", || badge.label() == "CHARGING" && badge.has_css_class("charging")).await?;
+    until("the charging badge", || badge.label() == "Charging" && badge.has_css_class("charging")).await?;
     headset.with(|sim, now| sim.set_charging(0, now));
-    until("the connected badge", || badge.label() == "CONNECTED").await?;
+    until("the connected badge", || badge.label() == "Connected").await?;
 
     // the gaming stylesheet parses cleanly
     let errors = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
