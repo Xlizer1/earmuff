@@ -152,7 +152,7 @@ impl MicRecorder for PipeWire {
 
 /// Little-endian 16-bit samples; a byte left over is dropped
 fn samples(bytes: &[u8]) -> Vec<i16> {
-    bytes.chunks_exact(2).map(|pair| i16::from_le_bytes([pair[0], pair[1]])).collect()
+    bytes.as_chunks::<2>().0.iter().map(|pair| i16::from_le_bytes(*pair)).collect()
 }
 
 /// A sink (speakers) or source (mic)
