@@ -1,0 +1,50 @@
+name: Support my headset
+description: Ask for a headset Earmuff doesn't drive yet, or doesn't drive fully
+labels: ["headset support"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks! Earmuff learns a headset from what it sends over USB. The more of the
+        below you can fill in, the sooner yours works.
+  - type: input
+    id: model
+    attributes:
+      label: Headset
+      description: Make and model, as on the box
+      placeholder: HyperX Cloud III Wireless
+    validations:
+      required: true
+  - type: input
+    id: usb-id
+    attributes:
+      label: USB ID
+      description: The `ID` from `lsusb` for the headset or its dongle, like `03f0:098d`
+    validations:
+      required: true
+  - type: textarea
+    id: list
+    attributes:
+      label: earmuff list
+      description: What `earmuff list` prints with the headset plugged in (empty is useful too)
+      render: text
+  - type: textarea
+    id: monitor
+    attributes:
+      label: earmuff sniff
+      description: |
+        Run `earmuff sniff VID:PID` with your headset's USB ID (add `sudo` if it can't
+        read the device) and then, one at a time and a few seconds apart: press the mute
+        button, turn the headset off and on, plug in the charger. Paste what it printed,
+        and say what you did when. It only listens; it never sends the headset anything.
+      render: text
+  - type: textarea
+    id: wanted
+    attributes:
+      label: What should work
+      description: The settings the vendor's app has, or the ones you miss most
+  - type: input
+    id: headsetcontrol
+    attributes:
+      label: HeadsetControl version
+      description: From `headsetcontrol -v`, if it's installed

@@ -1,0 +1,16 @@
+name: Feature request
+description: Something Earmuff could do
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you'd like
+      description: What it should do, and what for
+    validations:
+      required: true
+  - type: input
+    id: headset
+    attributes:
+      label: Headset
+      description: If it's about one headset in particular

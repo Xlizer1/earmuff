@@ -1,0 +1,45 @@
+name: Bug report
+description: Something in Earmuff doesn't work as it should
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: And what you expected instead
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen
+      placeholder: |
+        1. Open Earmuff
+        2. Turn on mic monitoring
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: list
+    attributes:
+      label: earmuff list
+      description: What `earmuff list` prints
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Earmuff version
+      description: From `earmuff --version`
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Distribution and desktop
+      placeholder: Arch Linux, Hyprland
+  - type: textarea
+    id: output
+    attributes:
+      label: Messages
+      description: Anything Earmuff printed when started from a terminal with `earmuff`
+      render: text
