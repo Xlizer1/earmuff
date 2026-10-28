@@ -161,6 +161,11 @@ Command bytes for the Cloud Alpha Wireless come from
 [HeadsetControl](https://github.com/Sapd/HeadsetControl) (GPL-3.0) and
 [HyperHeadset](https://github.com/LennardKittner/HyperHeadset) (MIT).
 
+## Trademarks
+
+Earmuff isn't affiliated with or endorsed by HP, HyperX, SteelSeries, Logitech, Corsair
+or any other headset maker. Product names are trademarks of their owners.
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).

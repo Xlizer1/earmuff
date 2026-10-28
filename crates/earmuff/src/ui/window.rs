@@ -51,6 +51,9 @@ pub(super) fn open(app: &adw::Application, backends: Vec<Arc<dyn Backend>>, opti
     }
 }
 
+/// Earmuff borrows a vendor app's look and names vendors' products, so it says it isn't theirs
+const TRADEMARKS: &str = "Earmuff isn't affiliated with or endorsed by HP, HyperX, SteelSeries, Logitech, Corsair or any other headset maker. Product names are trademarks of their owners.";
+
 /// An app action: its name, keyboard shortcut and what it does
 type AppAction = (&'static str, &'static str, fn(&Rc<Ui>));
 
@@ -525,6 +528,7 @@ impl Ui {
                 "HyperHeadset https://github.com/LennardKittner/HyperHeadset",
             ],
         );
+        about.add_legal_section("Trademarks", None, gtk::License::Custom, Some(TRADEMARKS));
         about.present(Some(&self.window));
     }
 
