@@ -64,10 +64,12 @@ pub fn minutes_left(samples: &[Sample], now: u64) -> Option<u32> {
     Some(minutes.min(100.0 * 60.0) as u32)
 }
 
-/// "About 9 h 20 min left", "About 45 min left"
+/// "About 9 h 20 min left", "About 45 min left"; past ten hours, minutes don't matter:
+/// "About 59 h left"
 pub fn time_left_text(minutes: u32) -> String {
     match (minutes / 60, minutes % 60) {
         (0, m) => format!("About {m} min left"),
+        (h, _) if h >= 10 => format!("About {h} h left"),
         (h, 0) => format!("About {h} h left"),
         (h, m) => format!("About {h} h {m} min left"),
     }
@@ -206,6 +208,7 @@ mod tests {
         assert_eq!(time_left_text(45), "About 45 min left");
         assert_eq!(time_left_text(120), "About 2 h left");
         assert_eq!(time_left_text(560), "About 9 h 20 min left");
+        assert_eq!(time_left_text(3575), "About 59 h left");
     }
 
     #[test]
