@@ -148,6 +148,9 @@ fn run_child(name: &str) -> Result<bool, String> {
         .env("XDG_RUNTIME_DIR", &runtime)
         .env("XDG_CONFIG_HOME", dir.path().join("config"))
         .env("XDG_STATE_HOME", dir.path().join("state"))
+        // nor the icons and fonts installed for the real Earmuff, nor the user's cache
+        .env("XDG_DATA_HOME", dir.path().join("data"))
+        .env("XDG_CACHE_HOME", dir.path().join("cache"))
         .env("DBUS_SESSION_BUS_ADDRESS", &address)
         .env("GSETTINGS_BACKEND", "memory")
         .env("GTK_A11Y", "none")
