@@ -43,6 +43,7 @@ make check                  # everything CI runs
   crates never depend on outer ones, and the outside world is reached through a port.
 - No `unsafe`; the workspace forbids it.
 - If the window changed, `make screenshots` retakes the README's pictures.
+- Words, colors and icons follow [docs/brand-guidelines.md](docs/brand-guidelines.md).
 
 ## Commits
 
