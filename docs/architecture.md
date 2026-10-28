@@ -12,9 +12,9 @@ earmuff (bin)  ──►  earmuff-infrastructure  ──►  earmuff-protocols
 | Crate | Layer | What it holds | Depends on |
 |---|---|---|---|
 | `earmuff-domain` | entities | headsets, capabilities, settings, status, events; validated values like `Percent` | nothing |
-| `earmuff-application` | use cases | the ports (`Backend`, `Session`), the `DeviceManager`, one-shot use cases for scripts | domain |
+| `earmuff-application` | use cases | the ports (`Backend`, `Session`, `AudioSystem`, `SoftwareEqualizer`, the stores…), the `DeviceManager`, battery alerts and history, remembered settings, sound switching, the software equalizer's rules, one-shot use cases for scripts | domain |
 | `earmuff-protocols` | adapters (pure) | byte codecs for natively driven headsets | domain |
-| `earmuff-infrastructure` | adapters (I/O) | hidraw access, the native backend, simulated demo headsets | application, protocols, domain |
+| `earmuff-infrastructure` | adapters (I/O) | hidraw access, the native and HeadsetControl backends, simulated demo headsets, PipeWire, Earmuff's own files | application, protocols, domain |
 | `earmuff` | presentation + composition root | window, tray icon, command line; picks the backends | everything |
 
 No crate uses `unsafe`: the workspace forbids it.
@@ -48,17 +48,41 @@ something to send.
   "headset with every feature" simulated at the domain level. Run `earmuff --demo`
   to try them; the tests use them everywhere.
 
+## Around the headset
+
+The window feeds every `AppEvent` to a few use cases in `earmuff-application`, each a
+plain state machine that's unit-tested on its own:
+
+- `BatteryAlerts` decides when to warn about a low battery or say it's charged.
+- `BatteryHistory` records a reading every five minutes (`HistoryStore`: a CSV file per
+  headset model under `$XDG_STATE_HOME/earmuff`) and estimates the time left.
+- `Profiles` remembers each headset's settings (`ProfileStore`: `headsets.json`) and says
+  which to put back when it reconnects.
+- `AudioSwitch` says when a headset turned on, for making it the computer's sound device.
+- `SoftwareEqs` keeps the software equalizer of each headset without one of its own
+  (`SoftwareEqStore`: `software-eq.json`), and an `EqualizerWorker` applies its changes
+  off the main thread, only the last of a burst.
+
+The sound system is behind ports too. `earmuff-infrastructure::pipewire` implements them
+with PipeWire's tools: `pw-dump` finds a headset's sink and source by USB ID, `wpctl`
+makes them the defaults, `pw-record` and `pw-play` run the mic test, and the software
+equalizer is a `filter-chain` of ten peaking filters in its own `pipewire -c` process,
+retuned live with `pw-cli`.
+
 ## Tests
 
 | Kind | Where | What runs |
 |---|---|---|
 | Unit | `#[cfg(test)]` in every crate | value rules, codecs against captured bytes, use cases and the manager with fakes, view models, CLI formatting |
-| Integration | `crates/earmuff-infrastructure/tests/` | native session + codec + use cases against the simulator; the manager against a demo headset; discovery in a fake sysfs; the HeadsetControl backend against the real program's mock headset |
+| Integration | `crates/earmuff-infrastructure/tests/` | native session + codec + use cases against the simulator; the manager against a demo headset; discovery in a fake sysfs; the HeadsetControl backend against the real program's mock headset; the PipeWire adapter against scripted stand-ins for its tools |
 | End to end | `crates/earmuff/tests/` | the `earmuff` binary (`cli.rs`); the real window driven like a user (`window.rs`); the tray icon over D-Bus (`tray.rs`) |
-| Hardware | `crates/earmuff-infrastructure/tests/hardware.rs` | opt-in, against a real Cloud Alpha Wireless; puts every setting back afterwards |
+| Hardware | `crates/earmuff-infrastructure/tests/hardware.rs`, and the ignored test in `pipewire.rs` | opt-in, against a real Cloud Alpha Wireless (puts every setting back afterwards) and the real PipeWire |
 
 `window.rs` and `tray.rs` re-run themselves as a child process with its own headless
 display (GTK's Broadway backend, `gtk4-broadwayd`), its own private D-Bus daemon and
 its own runtime directory, so they never show a window or touch the real session.
 `tray.rs` registers a fake StatusNotifierWatcher on that bus and drives the icon the
 way Waybar's tray does.
+
+`screenshots.rs` isn't a test: with `EARMUFF_SCREENSHOTS` set (`make screenshots`), it
+draws the window on the same headless display into the README's pictures.

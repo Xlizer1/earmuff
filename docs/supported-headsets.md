@@ -65,7 +65,10 @@ HeadsetControl support more headsets, and Earmuff picks those up without changes
 
 ## Missing yours?
 
-Open an issue with the output of `earmuff list` and `lsusb`. If you can, also run
-`earmuff monitor --raw` while you press the headset's buttons and change its
-settings in the vendor's app; that's how a native driver gets written
-(see [docs/protocols](protocols)).
+[Open an issue](https://github.com/Xlizer1/earmuff/issues/new?template=headset-support.yml)
+with the output of `earmuff list` and `lsusb`. If you can, also run
+`earmuff sniff VID:PID` (with the headset's USB ID from `lsusb`) while you press the
+headset's buttons, turn it off and on, and change its settings in the vendor's app.
+It prints every report the headset sends, without sending it anything; that's how a
+native driver gets written (see [docs/protocols](protocols)). Your headset's dongle
+may only be readable with `sudo` until Earmuff knows it.

@@ -3,6 +3,8 @@
 Battery and settings for your gaming headset on Linux, in place of vendor apps
 like HyperX NGENUITY. Written in Rust with GTK4 and libadwaita.
 
+![Earmuff showing a headset's battery, mic monitoring and ChatMix](docs/screenshots/overview.png)
+
 ## Supported headsets
 
 - **HyperX Cloud Alpha Wireless**, with Earmuff's own driver: instant updates and
@@ -12,22 +14,45 @@ like HyperX NGENUITY. Written in Rust with GTK4 and libadwaita.
   is installed.
 
 The full list with USB IDs is in [docs/supported-headsets.md](docs/supported-headsets.md).
-No headset at hand? `earmuff --demo` runs everything with simulated ones.
+No headset at hand? `earmuff --demo` runs everything with simulated ones. Yours isn't
+listed? [Ask for it](https://github.com/Xlizer1/earmuff/issues/new?template=headset-support.yml),
+with a few lines from `earmuff sniff`.
 
 ## What it does
 
-Run `earmuff`, or open "Earmuff" from the app menu. It shows what your headset has:
+Run `earmuff`, or open "Earmuff" from the app menu. It shows what your headset has,
+with a sidebar for every connected headset, a banner with its battery ring, and a tab
+per kind of setting.
 
-- battery level and charging state
-- mic mute (in sync with the button on the headset), mic volume, noise filter,
-  mute-when-raised and the mute light
-- mic monitoring (hearing your own voice) on/off and level
-- equalizer presets, ChatMix, volume limiter and lights
-- auto power-off, voice prompts and the Bluetooth options
+**Battery.** Level and charging state, how long it has left, and a graph of the last
+day or week. A notification says when the battery runs low (at a level you pick, and
+again at half of it) and when it's fully charged.
 
-The window has a dark gaming look: a sidebar with every connected headset, a banner
-with the headset's battery ring, and a tab per kind of setting. Pick the accent color
-(red, cyan, green, purple or orange) in Preferences.
+![Battery history and the time left](docs/screenshots/power.png)
+
+**Microphone.** Mute (in sync with the button on the headset), volume, noise filter,
+mute-when-raised and the mute light. A mic test records five seconds with a level
+meter and plays them back.
+
+**Sound.** Mic monitoring (hearing your own voice) and its level, ChatMix, the volume
+limiter, and the headset's equalizer: its presets, or a curve of your own, band by band.
+
+![The equalizer](docs/screenshots/equalizer.png)
+
+**A software equalizer** for headsets without one of their own, like the Cloud Alpha
+Wireless. It runs on the computer, in PipeWire, for everything played through the
+headset, with ten bands and presets for bass, footsteps, voices and treble.
+
+![The software equalizer on a Cloud Alpha Wireless](docs/screenshots/software-eq.png)
+
+**And the rest.** Lights, auto power-off, voice prompts, the notification sound and
+the Bluetooth options. The headset's model, USB ID and how Earmuff reaches it.
+
+Earmuff remembers each headset's settings and puts them back when it reconnects (some
+headsets forget theirs when turned off). It can also make a headset the computer's
+speakers and mic whenever it turns on. Both are in Preferences (Ctrl+,), with the
+accent color (red, cyan, green, purple or orange), the battery alerts and starting
+at login.
 
 | Shortcut | Does |
 |---|---|
@@ -36,10 +61,13 @@ with the headset's battery ring, and a tab per kind of setting. Pick the accent 
 | Ctrl+W | Close the window (Earmuff stays in the tray) |
 | Ctrl+Q | Quit |
 
+### In the tray
+
 Earmuff puts a headset icon in the system tray (Waybar's tray, KDE, or GNOME with the
 AppIndicator extension). Hover it for the battery; right-click for mic mute, Open and
 Quit. Like Discord, closing the window only hides it, and the app keeps running in
 the tray until you pick Quit. On a desktop without a tray, closing the window quits.
+Started at login, it waits in the tray without opening the window.
 
 ## Command line
 
@@ -47,25 +75,54 @@ the tray until you pick Quit. On a desktop without a tray, closing the window qu
 earmuff list [--json]             headsets Earmuff can reach
 earmuff status [--json]           battery and every setting
 earmuff set SETTING VALUE         e.g. set sidetone 40%, set eq-preset "Bass boost"
+earmuff set mute toggle           mute or unmute the mic, for a keyboard shortcut
 earmuff play-sound N              play one of the headset's notification sounds
 earmuff waybar                    JSON for a Waybar custom module
 earmuff monitor [--raw]           print what the headset reports, live
+earmuff sniff VID:PID             print every report any USB device sends, in hex
 ```
 
 `-d VID:PID` picks a headset (see `earmuff list`); without it, Earmuff uses the
 first one it finds. `earmuff set --help` lists every setting.
 
-`earmuff set mute toggle` flips the mic mute and prints the result, which makes a
-handy keyboard shortcut; [docs/shortcuts.md](docs/shortcuts.md) shows how to bind it
-on Hyprland, Sway, GNOME and KDE.
+`earmuff set mute toggle` prints `Mic muted` or `Mic on`;
+[docs/shortcuts.md](docs/shortcuts.md) shows how to bind it to a key on Hyprland, Sway,
+GNOME and KDE.
 
-`monitor --raw` prints every report in hex: leave it running, press a button or change
-a setting, and watch which bytes move. That's how new headsets get supported; see
-[docs/protocols](docs/protocols).
+`monitor --raw` and `sniff` print reports in hex: leave one running, press a button or
+change a setting, and watch which bytes move. `sniff` works on any USB device, also
+one Earmuff doesn't know yet, and never sends it anything. That's how new headsets
+get supported; see [docs/protocols](docs/protocols).
+
+### Waybar
+
+Besides the tray icon, Waybar can show the battery as text, styled by the `ok`, `low`,
+`charging` and `off` classes. It shows nothing while the dongle isn't plugged in.
+
+```json
+"custom/headset": {
+    "exec": "earmuff waybar",
+    "return-type": "json",
+    "interval": 60,
+    "format": "🎧 {}"
+}
+```
 
 ## Install
 
-You need Rust 1.88 or newer, GTK 4.16 and libadwaita 1.5 or newer.
+### Arch Linux
+
+```
+git clone https://github.com/Xlizer1/earmuff.git
+cd earmuff/packaging/aur && makepkg -si
+```
+
+The package includes the udev rule that lets you open the headset's dongle.
+
+### From source
+
+You need Rust 1.88 or newer, GTK 4.16 and libadwaita 1.5 or newer, and
+`glib-compile-resources` (part of GLib's development files).
 
 ```
 make install        # into ~/.local; PREFIX=/usr/local for everyone
@@ -75,21 +132,28 @@ make install-udev   # lets you open the headset's dongle (asks for sudo)
 `make install-udev` isn't needed if HeadsetControl is installed: its udev rule covers
 the same dongles. `make uninstall` and `make uninstall-udev` remove everything again.
 
+### What else it uses
+
+- [HeadsetControl](https://github.com/Sapd/HeadsetControl) 3.0 or newer, for headsets
+  other than the Cloud Alpha Wireless
+- PipeWire's and WirePlumber's tools (`pw-dump`, `pw-cli`, `pw-record`, `pw-play`,
+  `wpctl`), for the mic test, the software equalizer and switching the sound to a
+  headset. Most desktops with PipeWire have them already.
+
 ## Development
 
 Earmuff follows clean architecture: a Cargo workspace whose crates only depend inward.
-[docs/architecture.md](docs/architecture.md) explains the layers and the tests.
+[docs/architecture.md](docs/architecture.md) explains the layers and the tests, and
+[CONTRIBUTING.md](CONTRIBUTING.md) how to work on it.
 
 ```
 make check          # formatting, lints, unit, integration and end-to-end tests
 make test-hardware  # tests on a real Cloud Alpha Wireless (switched on)
+make screenshots    # retakes the pictures in this README
 ```
 
 The window and tray tests run headless, on their own display and D-Bus session, so
 nothing shows up on your desktop while they run.
-
-Commits follow [Conventional Commits](https://www.conventionalcommits.org/):
-`type(scope): summary`, for example `feat(ui): add battery history graph`.
 
 ## Credits
 
