@@ -123,13 +123,14 @@ windowtitle .title {
   100% { opacity: 1; }
 }
 
-/* the ring takes its color from here: the accent, or red when low */
+/* the ring takes its color from here: the accent, or the warning color when low (like
+   the sidebar's battery bars), so a low battery stands out whatever the accent */
 .battery-ring {
   color: var(--accent-color);
 }
 
 .battery-ring.low {
-  color: #ff4d4f;
+  color: var(--warning-color);
 }
 
 .ring-percent {
