@@ -84,6 +84,7 @@ pub enum SetCommand {
     /// Mute the microphone; `toggle` flips it, for a keyboard shortcut
     Mute { value: MuteValue },
     /// Mic monitoring (hearing your own voice): on, off, or a level from 0 to 100%
+    #[command(alias = "mic-monitoring")]
     Sidetone {
         #[arg(value_parser = parse_sidetone)]
         value: Sidetone,
@@ -452,6 +453,7 @@ mod tests {
         let cases: Vec<(&[&str], Vec<Setting>)> = vec![
             (&["sidetone", "40%"], vec![Setting::Sidetone(true), Setting::SidetoneLevel(level)]),
             (&["sidetone", "off"], vec![Setting::Sidetone(false)]),
+            (&["mic-monitoring", "off"], vec![Setting::Sidetone(false)]),
             (&["auto-off", "0"], vec![Setting::AutoOff(AutoOff::NEVER)]),
             (&["mute", "on"], vec![Setting::MicMuted(true)]),
             (&["mute", "off"], vec![Setting::MicMuted(false)]),
