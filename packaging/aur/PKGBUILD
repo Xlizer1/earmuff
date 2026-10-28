@@ -1,0 +1,41 @@
+# Maintainer: Xlizer1 <mustafa_142@mail.ru>
+pkgname=earmuff
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Battery and settings for your gaming headset, in place of vendor apps like HyperX NGENUITY"
+arch=('x86_64' 'aarch64')
+url="https://github.com/Xlizer1/earmuff"
+license=('GPL-3.0-or-later')
+depends=('gtk4' 'libadwaita' 'glib2' 'gcc-libs' 'glibc')
+makedepends=('cargo')
+optdepends=('headsetcontrol: about 40 more headsets'
+            'pipewire: the mic test and the software equalizer'
+            'wireplumber: switching the sound to a headset')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target
+  cargo build --frozen --release
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target
+  # the unit tests; the window and tray tests need a headless display server
+  cargo test --frozen --workspace --lib
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target
+  make DESTDIR="$pkgdir" PREFIX=/usr install
+  install -Dm644 data/udev/70-earmuff.rules "$pkgdir/usr/lib/udev/rules.d/70-earmuff.rules"
+}
