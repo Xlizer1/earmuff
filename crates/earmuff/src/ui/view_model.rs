@@ -735,7 +735,7 @@ fn sections(info: &DeviceInfo, s: &Status, software_eq: Option<&SoftwareEq>) -> 
             Some(ControlView {
                 control: Control::MicTest,
                 title: "Test your mic",
-                subtitle: Some(if muted { "Unmute the mic first" } else { "Record and play back five seconds" }),
+                subtitle: Some(if muted { "Unmute the mic first" } else { "Hear how you sound" }),
                 widget: Widget::MicTest,
                 sensitive: !muted,
             }),
@@ -1047,7 +1047,7 @@ mod tests {
             let control = model.view().unwrap().control(Control::MicTest).cloned().unwrap();
             (control.sensitive, control.subtitle.unwrap())
         };
-        assert_eq!(test(false), (true, "Record and play back five seconds"));
+        assert_eq!(test(false), (true, "Hear how you sound"));
         assert_eq!(test(true), (false, "Unmute the mic first"));
     }
 
