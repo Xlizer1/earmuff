@@ -64,7 +64,17 @@ fn seed_battery_history() -> Outcome {
         // 9 h ago until now: 92% down to 80%
         add(9.0 - f64::from(step) / 4.0, 92 - step / 3, 0);
     }
-    std::fs::write(dir.join("battery-03f0-098d.csv"), readings).map_err(|e| e.to_string())
+    std::fs::write(dir.join("battery-03f0-098d.csv"), &readings).map_err(|e| e.to_string())?;
+    // the demo headset, a little lower
+    let lower: String = readings
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split(',');
+            let (at, level, charging) = (parts.next()?, parts.next()?.parse::<u8>().ok()?, parts.next()?);
+            Some(format!("{at},{},{charging}\n", level.saturating_sub(16)))
+        })
+        .collect();
+    std::fs::write(dir.join("battery-f00b-a00d.csv"), lower).map_err(|e| e.to_string())
 }
 
 /// How tall the window must be to show the whole dashboard at `width`, without scrolling
