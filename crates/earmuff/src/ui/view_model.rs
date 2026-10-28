@@ -157,6 +157,11 @@ pub enum Widget {
     Curve(CurveView),
     /// Records a few seconds from the mic and plays them back, with a level meter
     MicTest,
+    /// One of a few named choices, shown side by side, like equalizer presets
+    Chips {
+        options: Vec<String>,
+        selected: Option<u32>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -373,7 +378,7 @@ impl DeviceView {
             .iter()
             .flat_map(|section| &section.controls)
             .map(|c| match &c.widget {
-                Widget::Choice { options, .. } => (c.control, options.clone()),
+                Widget::Choice { options, .. } | Widget::Chips { options, .. } => (c.control, options.clone()),
                 _ => (c.control, Vec::new()),
             })
             .collect()
@@ -638,17 +643,30 @@ fn equalizer_controls(
     let known = known.filter(|gains| gains.len() == eq.bands);
     let preset_view = (presets && !eq.presets.is_empty()).then(|| {
         let mut options: Vec<String> = eq.presets.iter().map(|p| p.name.clone()).collect();
-        let selected = match &known {
+        let matched = match &known {
             None => reported,
             Some(gains) => reported
                 .filter(|i| eq.presets.get(*i).is_some_and(|p| &p.curve == gains))
-                .or_else(|| eq.presets.iter().position(|p| &p.curve == gains))
-                .or_else(|| {
-                    options.push(CUSTOM.into());
-                    Some(options.len() - 1)
-                }),
+                .or_else(|| eq.presets.iter().position(|p| &p.curve == gains)),
         };
-        choice(controls.0, "Preset", options, selected)
+        if !curve {
+            return choice(controls.0, "Preset", options, matched);
+        }
+        // a curve of the user's own shows as "Custom", which is always there so the
+        // presets never change length
+        options.push(CUSTOM.into());
+        let selected = match (&known, matched) {
+            (Some(_), None) => Some(options.len() - 1),
+            (_, matched) => matched,
+        };
+        let selected = selected.and_then(|i| u32::try_from(i).ok());
+        ControlView {
+            control: controls.0,
+            title: "Preset",
+            subtitle: None,
+            widget: Widget::Chips { options, selected },
+            sensitive: true,
+        }
     });
     let curve_view = curve.then(|| {
         let preset = reported.and_then(|i| eq.presets.get(i)).map(|p| p.curve.clone());
@@ -1077,7 +1095,7 @@ mod tests {
 
     fn presets_of(view: &DeviceView) -> (Vec<String>, Option<u32>) {
         match &view.control(Control::EqualizerPreset).unwrap().widget {
-            Widget::Choice { options, selected } => (options.clone(), *selected),
+            Widget::Chips { options, selected } => (options.clone(), *selected),
             other => panic!("not a choice: {other:?}"),
         }
     }
@@ -1095,7 +1113,7 @@ mod tests {
         assert_eq!(curve_of(&view), bass);
         // a curve that matches a preset picks it
         let view = model_with(&EQ, vec![Event::Equalizer(bass.clone())]).view().unwrap();
-        assert_eq!(presets_of(&view), (vec!["Flat".into(), "Bass".into()], Some(1)));
+        assert_eq!(presets_of(&view), (vec!["Flat".into(), "Bass".into(), CUSTOM.into()], Some(1)));
         // anything else is the user's own
         let own = vec![Gain::tenths(10), Gain::tenths(-20)];
         let view = model_with(&EQ, vec![Event::EqualizerPreset(1), Event::Equalizer(own.clone())]).view().unwrap();
@@ -1151,7 +1169,7 @@ mod tests {
 
     fn presets_of_control(view: &DeviceView, control: Control) -> (Vec<String>, Option<u32>) {
         match &view.control(control).unwrap().widget {
-            Widget::Choice { options, selected } => (options.clone(), *selected),
+            Widget::Chips { options, selected } => (options.clone(), *selected),
             other => panic!("not a choice: {other:?}"),
         }
     }

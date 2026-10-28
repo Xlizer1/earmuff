@@ -129,8 +129,8 @@ async fn shoot(app: adw::Application, dir: PathBuf, headset: DemoHeadset, other:
     // the headset with everything, its equalizer on a preset
     other.set_chatmix(40);
     switcher.set_selected(1);
-    until("the demo headset", || find::<adw::ComboRow>(&window, "eq-preset").is_ok()).await?;
-    find::<adw::ComboRow>(&window, "eq-preset")?.set_selected(2);
+    until("the demo headset", || find::<gtk::ToggleButton>(&window, "eq-preset-2").is_ok()).await?;
+    find::<gtk::ToggleButton>(&window, "eq-preset-2")?.set_active(true);
     until("the footsteps curve", || {
         find::<gtk::Scale>(&window, "eq-band-6").is_ok_and(|band| (band.value() - 6.0).abs() < 0.01)
     })
@@ -145,10 +145,10 @@ async fn shoot(app: adw::Application, dir: PathBuf, headset: DemoHeadset, other:
     until("the mic to mute", || headset.with(|sim, _| sim.muted)).await?;
     find::<gtk::Switch>(&window, "software-eq")?.set_active(true);
     until("the software equalizer", || {
-        find::<adw::ComboRow>(&window, "software-eq-preset").is_ok_and(|row| row.is_sensitive())
+        find::<gtk::FlowBox>(&window, "software-eq-preset").is_ok_and(|chips| chips.is_sensitive())
     })
     .await?;
-    find::<adw::ComboRow>(&window, "software-eq-preset")?.set_selected(1);
+    find::<gtk::ToggleButton>(&window, "software-eq-preset-1")?.set_active(true);
     until("the bass boost curve", || {
         find::<gtk::Scale>(&window, "eq-band-0").is_ok_and(|band| (band.value() - 6.0).abs() < 0.01)
     })

@@ -30,6 +30,7 @@ pub(super) enum Row {
     // on their own in a panel
     Level(gtk::Box, gtk::Scale, gtk::Label),
     Segmented(gtk::Box, Vec<gtk::ToggleButton>),
+    Chips(gtk::FlowBox, Vec<gtk::ToggleButton>),
     MuteTile(MuteTile),
     Balance(gtk::Box, gtk::Label, gtk::Scale),
     Curve(Rc<EqualizerEditor>),
@@ -45,6 +46,7 @@ impl Row {
             Row::Choice(row) => row.upcast_ref(),
             Row::Info(row) | Row::Button(row) | Row::MicTest(row, ..) => row.upcast_ref(),
             Row::Level(row, ..) | Row::Segmented(row, _) | Row::Balance(row, ..) => row.upcast_ref(),
+            Row::Chips(chips, _) => chips.upcast_ref(),
             Row::MuteTile(tile) => tile.button.upcast_ref(),
             Row::Curve(editor) => editor.widget.upcast_ref(),
             Row::HeaderSwitch(switch) => switch.upcast_ref(),
@@ -294,10 +296,27 @@ impl Ui {
     /// A panel for one section of controls. Rows that belong in a list share one.
     fn section_panel(self: &Rc<Self>, section: &SectionView, rows: &mut HashMap<Control, Row>) -> gtk::Box {
         let (widget, header) = panel(section.panel, section.title);
-        if let Some(text) = section.description {
-            let description =
-                gtk::Label::builder().label(text).css_classes(["dim-label"]).xalign(0.0).wrap(true).build();
-            widget.append(&description);
+        match (section.description, section.panel) {
+            // a short tag beside the equalizer's title, like "On this computer"
+            (Some(text), Panel::Equalizer) => {
+                let title = header.first_child();
+                if let Some(title) = &title {
+                    title.set_hexpand(false);
+                }
+                let tag = gtk::Label::builder()
+                    .label(text)
+                    .css_classes(["caption-chip"])
+                    .halign(gtk::Align::Start)
+                    .hexpand(true)
+                    .build();
+                header.insert_child_after(&tag, title.as_ref());
+            }
+            (Some(text), _) => {
+                let description =
+                    gtk::Label::builder().label(text).css_classes(["dim-label"]).xalign(0.0).wrap(true).build();
+                widget.append(&description);
+            }
+            (None, _) => {}
         }
         let mut current: Option<gtk::ListBox> = None;
         for control in &section.controls {
@@ -452,6 +471,39 @@ impl Ui {
                 row.append(&strip);
                 Row::Segmented(row, buttons)
             }
+            (Widget::Chips { options, .. }, _) => {
+                let chips = gtk::FlowBox::builder()
+                    .name(control.name())
+                    .selection_mode(gtk::SelectionMode::None)
+                    .max_children_per_line(12)
+                    .column_spacing(8)
+                    .row_spacing(8)
+                    .css_classes(["chips"])
+                    .build();
+                let buttons: Vec<gtk::ToggleButton> = options
+                    .iter()
+                    .enumerate()
+                    .map(|(index, option)| {
+                        gtk::ToggleButton::builder()
+                            .label(option.as_str())
+                            .name(format!("{}-{index}", control.name()))
+                            .build()
+                    })
+                    .collect();
+                for (index, button) in buttons.iter().enumerate() {
+                    if index > 0 {
+                        button.set_group(Some(&buttons[0]));
+                    }
+                    let weak = Rc::downgrade(self);
+                    button.connect_toggled(move |button| {
+                        if let (true, Some(ui)) = (button.is_active(), weak.upgrade()) {
+                            ui.input(control, Input::Choice(index as u32));
+                        }
+                    });
+                    chips.insert(button, -1);
+                }
+                Row::Chips(chips, buttons)
+            }
             (Widget::Choice { options, .. }, _) => {
                 let options: Vec<&str> = options.iter().map(String::as_str).collect();
                 let row = adw::ComboRow::builder()
@@ -573,7 +625,8 @@ impl Ui {
                     }
                     value.set_label(&level.map(|level| format!("{level}%")).unwrap_or_default());
                 }
-                (Row::Segmented(_, buttons), Widget::Choice { selected, .. }) => match selected {
+                (Row::Segmented(_, buttons), Widget::Choice { selected, .. })
+                | (Row::Chips(_, buttons), Widget::Chips { selected, .. }) => match selected {
                     Some(index) => {
                         if let Some(button) = buttons.get(*index as usize) {
                             button.set_active(true);

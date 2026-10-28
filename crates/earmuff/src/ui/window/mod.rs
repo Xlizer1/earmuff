@@ -481,9 +481,21 @@ impl Ui {
             self.change_software_eq(&device, eq);
             return;
         }
-        let model = self.model.borrow();
-        if let (Some(setting), Some((info, _))) = (model.setting(control, input), model.current()) {
-            self.send_to(&info.id, setting);
+        let (setting, device) = {
+            let model = self.model.borrow();
+            (model.setting(control, input), model.current().map(|(info, _)| info.id.clone()))
+        };
+        match (setting, device) {
+            (Some(setting), Some(device)) => self.send_to(&device, setting),
+            // a choice that asks for nothing (the "Custom" preset) shows what's true again
+            _ => {
+                let weak = Rc::downgrade(self);
+                glib::idle_add_local_once(move || {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.render();
+                    }
+                });
+            }
         }
     }
 

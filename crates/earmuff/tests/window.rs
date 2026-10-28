@@ -252,12 +252,12 @@ async fn scenario(
     let software: gtk::Switch = find(&window, "software-eq")?;
     ensure(!software.is_active(), "the software equalizer is off at first")?;
     // its presets and curve are there all along, dimmed until it's on, so nothing moves
-    let presets: adw::ComboRow = find(&window, "software-eq-preset")?;
+    let presets: gtk::FlowBox = find(&window, "software-eq-preset")?;
     ensure(!presets.is_sensitive(), "the presets wait for the equalizer")?;
     software.set_active(true);
     until("the software equalizer to start flat", || applied(&[Gain::tenths(0); 10])).await?;
     until("its presets", || presets.is_sensitive()).await?;
-    find::<adw::ComboRow>(&window, "software-eq-preset")?.set_selected(1);
+    find::<gtk::ToggleButton>(&window, "software-eq-preset-1")?.set_active(true);
     let bass = software_equalizer().presets[1].curve.clone();
     until("the bass boost curve", || applied(&bass)).await?;
     until("the curve's bands", || find::<gtk::Scale>(&window, "eq-band-0").is_ok_and(|band| band.value() == 6.0))
@@ -266,10 +266,7 @@ async fn scenario(
     let mut own = bass.clone();
     own[9] = Gain::tenths(-30);
     until("a curve of the user's own", || applied(&own)).await?;
-    until("the preset to show as custom", || {
-        find::<adw::ComboRow>(&window, "software-eq-preset").is_ok_and(|row| selected_text(&row) == "Custom")
-    })
-    .await?;
+    until("the preset to show as custom", || chosen(&window, "software-eq-preset") == "Custom").await?;
     software.set_active(false);
     until("the software equalizer to stop", || {
         support::equalizer_actions().last() == Some(&EqAction::Stop(cloud_alpha))
@@ -290,17 +287,16 @@ async fn scenario(
     until("the other headset", || title.label() == "Earmuff Demo Headset").await?;
     until("its settings", || find::<adw::SwitchRow>(&window, "lights").is_ok()).await?;
     let lights: adw::SwitchRow = find(&window, "lights")?;
-    let preset: adw::ComboRow = find(&window, "eq-preset")?;
     let mic_volume: gtk::Scale = find(&window, "mic-volume")?;
     let chatmix: gtk::Label = find(&window, "chatmix")?;
     until("the lights to show as on", || lights.is_active()).await?;
-    ensure(selected_text(&preset) == "Flat", "starts on the flat preset")?;
+    ensure(chosen(&window, "eq-preset") == "Flat", "starts on the flat preset")?;
 
     lights.set_active(false);
     until("the lights to turn off", || other.status().lights == Some(false)).await?;
     find::<gtk::ToggleButton>(&window, "noise-filter-2")?.set_active(true);
     until("the noise filter to go high", || other.status().noise_filter == Some(NoiseFilter::High)).await?;
-    preset.set_selected(1);
+    find::<gtk::ToggleButton>(&window, "eq-preset-1")?.set_active(true);
     until("the bass boost preset", || other.status().equalizer_preset == Some(1)).await?;
 
     // the equalizer shows the preset's curve band by band; moving a band makes it the user's own
@@ -310,10 +306,10 @@ async fn scenario(
     high.set_value(3.2);
     let own: Vec<Gain> = [60, 40, 20, 0, 0, 0, 0, 0, 0, 30].map(Gain::tenths).to_vec();
     until("the curve to reach the headset", || other.status().equalizer.as_ref() == Some(&own)).await?;
-    until("the preset to show as custom", || selected_text(&preset) == "Custom").await?;
+    until("the preset to show as custom", || chosen(&window, "eq-preset") == "Custom").await?;
     find::<gtk::Button>(&window, "equalizer-flat")?.emit_clicked();
     until("a flat curve", || other.status().equalizer == Some(vec![Gain::tenths(0); 10])).await?;
-    until("the flat preset", || selected_text(&preset) == "Flat").await?;
+    until("the flat preset", || chosen(&window, "eq-preset") == "Flat").await?;
     mic_volume.set_value(30.0);
     until("the mic volume", || other.status().mic_volume == Some(Percent::saturating(30))).await?;
 
@@ -379,6 +375,16 @@ async fn scenario(
     // without a tray icon, closing the window quits
     window.close();
     Ok(())
+}
+
+/// The label of the chosen chip in a row of chips named `chips`
+fn chosen(window: &gtk::Window, chips: &str) -> String {
+    (0..)
+        .map_while(|index| find::<gtk::ToggleButton>(window, &format!("{chips}-{index}")).ok())
+        .find(|chip| chip.is_active())
+        .and_then(|chip| chip.label())
+        .map(String::from)
+        .unwrap_or_default()
 }
 
 fn selected_text(combo: &adw::ComboRow) -> String {

@@ -122,6 +122,54 @@ list.panel-rows > row > box.header {
   color: var(--accent-color);
 }
 
+/* equalizer presets: chips, the chosen one in the accent */
+.chips > flowboxchild {
+  padding: 0;
+  background: none;
+}
+
+.chips button {
+  min-height: 30px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  background: none;
+  box-shadow: none;
+  font-size: 13px;
+  font-weight: 600;
+  color: alpha(currentColor, 0.75);
+}
+
+.chips button:checked {
+  background-color: rgb(61 220 196 / 14%);
+  border-color: rgb(61 220 196 / 45%);
+  color: var(--accent-color);
+}
+
+.caption-chip {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  color: alpha(currentColor, 0.6);
+}
+
+/* equalizer faders: slim tracks, knobs in the accent on the curve */
+.eq-editor scale.vertical > trough {
+  min-width: 2px;
+  background-color: rgb(255 255 255 / 8%);
+}
+
+.eq-editor scale.vertical > trough > slider {
+  min-width: 16px;
+  min-height: 16px;
+  margin: -7px;
+  background-color: var(--accent-color);
+  border: 3px solid var(--card-bg-color);
+  box-shadow: none;
+}
+
 /* the mic's mute: one big button, the same size either way */
 .mute-tile {
   min-height: 76px;
