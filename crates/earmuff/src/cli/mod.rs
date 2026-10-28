@@ -3,6 +3,7 @@
 mod output;
 
 use std::io::{self, Write};
+use std::path::Path;
 use std::process::ExitCode;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -13,6 +14,7 @@ use earmuff_application::{
     Backend, Session, SessionError, apply_settings, discover, open_device, read_status, toggle_mute,
 };
 use earmuff_domain::{AutoOff, DeviceInfo, Gain, NoiseFilter, Percent, Query, Setting, UsbId};
+use earmuff_infrastructure::hidraw::{SYSFS_HIDRAW, Sniffer};
 use gtk::glib;
 
 pub use output::{chatmix_text, event_line, list_json, list_text, preset_name, status_json, status_text, waybar_json};
@@ -68,6 +70,12 @@ pub enum Command {
         /// Also print every report in hex (handy for decoding new ones)
         #[arg(long)]
         raw: bool,
+    },
+    /// Print every report any USB device sends, in hex, without sending it anything.
+    /// For headsets Earmuff doesn't know yet; may need sudo.
+    Sniff {
+        #[arg(value_name = "VID:PID")]
+        usb: UsbId,
     },
 }
 
@@ -207,6 +215,7 @@ pub fn settings(command: &SetCommand, info: &DeviceInfo) -> Result<Vec<Setting>,
 pub fn run(command: Command, device: Option<UsbId>, backends: &[Arc<dyn Backend>]) -> ExitCode {
     match command {
         Command::List { json } => return list(backends, json),
+        Command::Sniff { usb } => return sniff(usb),
         Command::Waybar => {
             let status = open_device(backends, device).ok().and_then(|mut session| read_battery(session.as_mut()).ok());
             println!("{}", waybar_json(status.as_ref()));
@@ -298,7 +307,7 @@ fn execute(session: &mut dyn Session, command: &Command) -> Result<(), Failure> 
             Err(Failure::Output(error)) if error.kind() == io::ErrorKind::BrokenPipe => {}
             result => result?,
         },
-        Command::List { .. } | Command::Waybar => unreachable!("handled in run()"),
+        Command::List { .. } | Command::Waybar | Command::Sniff { .. } => unreachable!("handled in run()"),
     }
     Ok(())
 }
@@ -318,6 +327,38 @@ fn monitor(session: &mut dyn Session, raw: bool) -> Result<(), Failure> {
     loop {
         for event in session.poll(Duration::from_secs(3600))? {
             writeln!(out, "{}  {}", clock(), event_line(&event)).map_err(Failure::Output)?;
+        }
+    }
+}
+
+fn sniff(usb: UsbId) -> ExitCode {
+    let mut sniffer = match Sniffer::open(Path::new(SYSFS_HIDRAW), usb) {
+        Ok(sniffer) => sniffer,
+        Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+            eprintln!("earmuff: can't read {error}; try `sudo earmuff sniff {usb}`");
+            return ExitCode::FAILURE;
+        }
+        Err(error) => {
+            eprintln!("earmuff: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    eprintln!("earmuff: reading {} (Ctrl+C stops)", sniffer.names().join(", "));
+    let mut out = io::stdout().lock();
+    loop {
+        let reports = match sniffer.next(Duration::from_secs(3600)) {
+            Ok(reports) => reports,
+            Err(error) => {
+                eprintln!("earmuff: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+        for (node, report) in reports {
+            let hex: Vec<String> = report.iter().map(|b| format!("{b:02x}")).collect();
+            if writeln!(out, "{}  {node}  {}", clock(), hex.join(" ")).is_err() {
+                // the reader went away (e.g. piped into head)
+                return ExitCode::SUCCESS;
+            }
         }
     }
 }

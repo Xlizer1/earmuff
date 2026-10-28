@@ -197,3 +197,10 @@ fn help_and_version() {
     }
     assert_eq!(stdout(&earmuff(&["--version"])), format!("earmuff {}\n", env!("CARGO_PKG_VERSION")));
 }
+
+#[test]
+fn sniffing_a_device_that_isnt_plugged_in_says_so() {
+    let output = earmuff(&["sniff", "1234:5678"]);
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("no USB device 1234:5678 is plugged in"), "{}", stderr(&output));
+}

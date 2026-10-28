@@ -130,9 +130,94 @@ impl Transport for HidrawTransport {
     }
 }
 
+/// Reads every report a USB device's hidraw nodes send, without sending anything:
+/// for learning a headset Earmuff doesn't know yet
+#[derive(Debug)]
+pub struct Sniffer {
+    /// Each node's name (like `hidraw3`) and the node, opened read-only
+    nodes: Vec<(String, File)>,
+}
+
+impl Sniffer {
+    /// Every hidraw node of the USB device, from `sysfs` (normally [`SYSFS_HIDRAW`]).
+    /// NotFound when the device isn't plugged in.
+    pub fn open(sysfs: &Path, usb: UsbId) -> io::Result<Self> {
+        let mut nodes = Vec::new();
+        for node in scan(sysfs).into_iter().filter(|node| node.usb == usb) {
+            let file = File::open(&node.path)
+                .map_err(|error| io::Error::new(error.kind(), format!("{}: {error}", node.path.display())))?;
+            let name = node.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            nodes.push((name, file));
+        }
+        if nodes.is_empty() {
+            return Err(io::Error::new(io::ErrorKind::NotFound, format!("no USB device {usb} is plugged in")));
+        }
+        Sniffer::from_files(nodes)
+    }
+
+    /// Already opened nodes, by name
+    pub fn from_files(nodes: Vec<(String, File)>) -> io::Result<Self> {
+        for (_, file) in &nodes {
+            rustix::io::ioctl_fionbio(file, true)?;
+        }
+        Ok(Sniffer { nodes })
+    }
+
+    /// The names of the nodes it reads
+    pub fn names(&self) -> Vec<&str> {
+        self.nodes.iter().map(|(name, _)| name.as_str()).collect()
+    }
+
+    /// Waits up to `timeout` for reports; returns each with the name of the node it came from
+    pub fn next(&mut self, timeout: Duration) -> io::Result<Vec<(String, Vec<u8>)>> {
+        let timeout = Timespec::try_from(timeout).unwrap_or(Timespec { tv_sec: i64::MAX, tv_nsec: 0 });
+        let mut fds: Vec<PollFd> = self.nodes.iter().map(|(_, file)| PollFd::new(file, PollFlags::IN)).collect();
+        match poll(&mut fds, Some(&timeout)) {
+            Ok(_) | Err(rustix::io::Errno::INTR) => {}
+            Err(e) => return Err(e.into()),
+        }
+        let ready: Vec<PollFlags> = fds.iter().map(PollFd::revents).collect();
+        let mut reports = Vec::new();
+        for ((name, file), events) in self.nodes.iter_mut().zip(ready) {
+            if events.intersects(PollFlags::HUP | PollFlags::ERR | PollFlags::NVAL) {
+                return Err(io::Error::new(io::ErrorKind::NotConnected, "the device was unplugged"));
+            }
+            let mut buf = [0; 64];
+            loop {
+                match file.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => reports.push((name.clone(), buf[..n].to_vec())),
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+        Ok(reports)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_sniffer_passes_on_each_report_with_its_node() {
+        let (reader, mut writer) = io::pipe().unwrap();
+        let mut sniffer = Sniffer::from_files(vec![("hidraw9".into(), File::from(OwnedFd::from(reader)))]).unwrap();
+        assert_eq!(sniffer.names(), ["hidraw9"]);
+        assert_eq!(sniffer.next(Duration::from_millis(10)).unwrap(), []);
+        writer.write_all(&[0x21, 0xBB, 0x23, 0x01]).unwrap();
+        let reports = sniffer.next(Duration::from_secs(1)).unwrap();
+        assert_eq!(reports, [("hidraw9".to_string(), vec![0x21, 0xBB, 0x23, 0x01])]);
+    }
+
+    #[test]
+    fn sniffing_a_device_that_isnt_there() {
+        let sysfs = tempfile::tempdir().unwrap();
+        let error = Sniffer::open(sysfs.path(), UsbId::new(0x1234, 0x5678)).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert_eq!(error.to_string(), "no USB device 1234:5678 is plugged in");
+    }
 
     #[test]
     fn parses_usb_hid_ids() {
