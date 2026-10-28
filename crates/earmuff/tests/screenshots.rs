@@ -91,15 +91,16 @@ async fn save(window: &gtk::Window, path: &Path) -> Outcome {
     Ok(())
 }
 
-/// Scrolls the page with the widget named `inside` all the way down
-fn scroll_down(window: &gtk::Window, inside: &str) -> Outcome {
+/// Scrolls the settings page all the way down, or back to the top. The tabs share one
+/// scrolled page, so a scroll stays until it's undone.
+fn scroll(window: &gtk::Window, down: bool) -> Outcome {
     let content = window.first_child().ok_or("an empty window")?;
     // lay out first, so the scrolled page knows how tall it is
     content.allocate(WIDTH, HEIGHT, -1, None);
-    let widget: gtk::Widget = find(window, inside)?;
-    let scrolled = widget.ancestor(gtk::ScrolledWindow::static_type()).ok_or("not on a scrolled page")?;
+    let tabs: gtk::Widget = find(window, "tabs")?;
+    let scrolled = tabs.ancestor(gtk::ScrolledWindow::static_type()).ok_or("not on a scrolled page")?;
     let adjustment = scrolled.downcast::<gtk::ScrolledWindow>().map_err(|_| "not scrolled")?.vadjustment();
-    adjustment.set_value(adjustment.upper() - adjustment.page_size());
+    adjustment.set_value(if down { adjustment.upper() - adjustment.page_size() } else { 0.0 });
     Ok(())
 }
 
@@ -137,10 +138,11 @@ async fn shoot(app: adw::Application, dir: PathBuf, headset: DemoHeadset, other:
     tabs.set_visible_child_name("audio");
     settle().await;
     save(&window, &dir.join("overview.png")).await?;
-    scroll_down(&window, "equalizer")?;
+    scroll(&window, true)?;
     save(&window, &dir.join("equalizer.png")).await?;
 
     tabs.set_visible_child_name("microphone");
+    scroll(&window, false)?;
     settle().await;
     save(&window, &dir.join("microphone.png")).await?;
 
@@ -148,6 +150,7 @@ async fn shoot(app: adw::Application, dir: PathBuf, headset: DemoHeadset, other:
     list.select_row(list.row_at_index(0).as_ref());
     until("the Cloud Alpha", || find::<adw::SwitchRow>(&window, "software-eq").is_ok()).await?;
     tabs.set_visible_child_name("power");
+    scroll(&window, false)?;
     settle().await;
     save(&window, &dir.join("power.png")).await?;
 
@@ -160,7 +163,7 @@ async fn shoot(app: adw::Application, dir: PathBuf, headset: DemoHeadset, other:
     .await?;
     tabs.set_visible_child_name("audio");
     settle().await;
-    scroll_down(&window, "equalizer")?;
+    scroll(&window, true)?;
     save(&window, &dir.join("software-eq.png")).await?;
 
     // put things back the way they were found, then quit
