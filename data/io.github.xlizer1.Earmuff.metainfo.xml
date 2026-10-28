@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- What software centers (GNOME Software, KDE Discover) show for Earmuff -->
+<component type="desktop-application">
+  <id>io.github.xlizer1.Earmuff</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Earmuff</name>
+  <summary>Battery and settings for your gaming headset</summary>
+  <developer id="io.github.xlizer1">
+    <name>Xlizer1</name>
+  </developer>
+  <description>
+    <p>
+      Earmuff shows your gaming headset's battery and settings, in place of vendor apps
+      like HyperX NGENUITY. It drives the HyperX Cloud Alpha Wireless itself, and about
+      40 more models from Logitech, SteelSeries, Corsair and others through HeadsetControl.
+    </p>
+    <ul>
+      <li>Battery level, the time left, a battery history graph, and alerts when it runs low</li>
+      <li>Mic mute, volume and noise filter, mic monitoring, and a mic test</li>
+      <li>The headset's equalizer, and a software equalizer for headsets without one</li>
+      <li>ChatMix, lights, auto power-off and voice prompts</li>
+      <li>A tray icon, starting at login, and a command line for scripts and keyboard shortcuts</li>
+    </ul>
+    <p>
+      Earmuff isn't affiliated with or endorsed by HP, HyperX, SteelSeries, Logitech, Corsair
+      or any other headset maker. Product names are trademarks of their owners.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.xlizer1.Earmuff.desktop</launchable>
+  <url type="homepage">https://github.com/Xlizer1/earmuff</url>
+  <url type="bugtracker">https://github.com/Xlizer1/earmuff/issues</url>
+  <url type="vcs-browser">https://github.com/Xlizer1/earmuff</url>
+  <url type="contribute">https://github.com/Xlizer1/earmuff/blob/main/CONTRIBUTING.md</url>
+  <screenshots>
+    <screenshot type="default">
+      <caption>A headset's battery, mic monitoring and ChatMix</caption>
+      <image>https://raw.githubusercontent.com/Xlizer1/earmuff/main/docs/screenshots/overview.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>The headset's equalizer</caption>
+      <image>https://raw.githubusercontent.com/Xlizer1/earmuff/main/docs/screenshots/equalizer.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Battery history and the time left</caption>
+      <image>https://raw.githubusercontent.com/Xlizer1/earmuff/main/docs/screenshots/power.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>The software equalizer, for headsets without one</caption>
+      <image>https://raw.githubusercontent.com/Xlizer1/earmuff/main/docs/screenshots/software-eq.png</image>
+    </screenshot>
+  </screenshots>
+  <branding>
+    <color type="primary" scheme_preference="light">#ffc2c4</color>
+    <color type="primary" scheme_preference="dark">#4a0f13</color>
+  </branding>
+  <content_rating type="oars-1.1"/>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <provides>
+    <binary>earmuff</binary>
+    <!-- the dongle Earmuff drives itself, so software centers can suggest it -->
+    <modalias>usb:v03F0p098D*</modalias>
+  </provides>
+  <releases>
+    <release version="0.1.0" date="2026-10-28">
+      <description>
+        <p>The first release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

@@ -14,8 +14,9 @@ jobs:
     steps:
       - name: Install build and test dependencies
         # dbus-daemon and gtk4-broadwayd (part of gtk4) run the headless window and tray tests;
-        # headsetcontrol's mock headset runs the HeadsetControl backend tests
-        run: pacman -Syu --noconfirm --needed base-devel git rust gtk4 libadwaita dbus ttf-dejavu headsetcontrol
+        # headsetcontrol's mock headset runs the HeadsetControl backend tests;
+        # appstream and desktop-file-utils check what software centers and menus read
+        run: pacman -Syu --noconfirm --needed base-devel git rust gtk4 libadwaita dbus ttf-dejavu headsetcontrol appstream desktop-file-utils
 
       - uses: actions/checkout@v4
 
@@ -36,3 +37,8 @@ jobs:
 
       - name: Unit, integration and end-to-end tests
         run: cargo test --workspace
+
+      - name: Desktop and AppStream files
+        run: |
+          appstreamcli validate --no-net data/io.github.xlizer1.Earmuff.metainfo.xml
+          desktop-file-validate data/io.github.xlizer1.Earmuff.desktop
