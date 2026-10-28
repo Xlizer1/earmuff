@@ -181,7 +181,7 @@ async fn scenario(app: adw::Application, headset: DemoHeadset, watcher: Watcher,
 
     // muting from the menu mutes the headset, and the menu shows it
     let entries = menu(&bus, &service, &menu_path).await?;
-    let (mute, checked) = *entries.get("Mute microphone").ok_or("no mute entry in the menu")?;
+    let (mute, checked) = *entries.get("Mute mic").ok_or("no mute entry in the menu")?;
     support::ensure(!checked, "mute starts unchecked")?;
     click(&bus, &service, &menu_path, mute).await?;
     until("the headset to mute", || headset.with(|sim, _| sim.muted)).await?;
@@ -189,7 +189,7 @@ async fn scenario(app: adw::Application, headset: DemoHeadset, watcher: Watcher,
     until("the window's switch to follow", || mute_row.is_active()).await?;
     let mut checked = false;
     for _ in 0..500 {
-        checked = menu(&bus, &service, &menu_path).await?["Mute microphone"].1;
+        checked = menu(&bus, &service, &menu_path).await?["Mute mic"].1;
         if checked {
             break;
         }

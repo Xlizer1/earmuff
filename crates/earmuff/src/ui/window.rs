@@ -236,7 +236,7 @@ impl Ui {
         let missing_page = adw::StatusPage::builder()
             .name("missing-page")
             .icon_name("earmuff-headset-symbolic")
-            .title("Plug in your headset's USB dongle")
+            .title("Plug in your headset or its USB dongle")
             .build();
         let off_page = adw::StatusPage::builder()
             .name("off-page")
@@ -350,7 +350,7 @@ impl Ui {
         glib::spawn_future_local(async move {
             while let Ok(error) = receiver.recv().await {
                 let Some(ui) = weak.upgrade() else { break };
-                ui.toasts.add_toast(adw::Toast::new(&format!("Equalizer: {error}")));
+                ui.toasts.add_toast(adw::Toast::new(&format!("Couldn't change the equalizer: {error}")));
             }
         });
     }
@@ -703,7 +703,7 @@ impl Ui {
         if let MicTestUpdate::Done(result) = update {
             self.mic_testing.set(false);
             if let Err(error) = result {
-                self.toasts.add_toast(adw::Toast::new(&format!("Mic test: {error}")));
+                self.toasts.add_toast(adw::Toast::new(&format!("Couldn't test the mic: {error}")));
             }
         }
         if let Some(Row::MicTest(row, meter, button)) = self.rows.borrow().rows.get(&Control::MicTest) {

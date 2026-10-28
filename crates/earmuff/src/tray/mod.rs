@@ -37,10 +37,10 @@ impl TrayState {
         let status_line = match (s.connected, s.battery) {
             (None, _) => "Connecting…".into(),
             (Some(false), _) => "Headset is off".into(),
-            (Some(true), None) => "Battery …".into(),
+            (Some(true), None) => "Reading the battery…".into(),
             (Some(true), Some(level)) => match s.charge {
                 Some(ChargeState::Charging) => format!("Battery {level}, charging"),
-                Some(ChargeState::Full) => format!("Battery {level}, full"),
+                Some(ChargeState::Full) => format!("Battery {level}, fully charged"),
                 _ => format!("Battery {level}"),
             },
         };
@@ -105,7 +105,7 @@ impl Tray for HeadsetTray {
             StandardItem { label: self.state.status_line.clone(), enabled: false, ..Default::default() }.into(),
             MenuItem::Separator,
             CheckmarkItem {
-                label: "Mute microphone".into(),
+                label: "Mute mic".into(),
                 checked: muted.unwrap_or(false),
                 enabled: muted.is_some(),
                 activate: Box::new(move |tray: &mut Self| tray.send(TrayEvent::SetMute(!muted.unwrap_or(false)))),

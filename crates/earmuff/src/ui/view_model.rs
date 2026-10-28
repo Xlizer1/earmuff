@@ -43,7 +43,7 @@ pub fn alert_text(alert: &earmuff_application::Alert) -> (String, String) {
         Alert::Critical { name, level, .. } => {
             ("Headset battery almost empty".into(), format!("{name}: {level}% left. Charge it soon."))
         }
-        Alert::Charged { name, .. } => ("Headset charged".into(), format!("{name} is fully charged.")),
+        Alert::Charged { name, .. } => ("Headset fully charged".into(), format!("{name} is fully charged.")),
     }
 }
 
