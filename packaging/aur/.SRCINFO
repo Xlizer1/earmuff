@@ -1,0 +1,21 @@
+pkgbase = earmuff
+	pkgdesc = Battery and settings for your gaming headset, in place of vendor apps like HyperX NGENUITY
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/Xlizer1/earmuff
+	arch = x86_64
+	arch = aarch64
+	license = GPL-3.0-or-later
+	makedepends = cargo
+	depends = gtk4
+	depends = libadwaita
+	depends = glib2
+	depends = gcc-libs
+	depends = glibc
+	optdepends = headsetcontrol: about 40 more headsets
+	optdepends = pipewire: the mic test and the software equalizer
+	optdepends = wireplumber: switching the sound to a headset
+	source = earmuff-0.1.0.tar.gz::https://github.com/Xlizer1/earmuff/archive/refs/tags/v0.1.0.tar.gz
+	sha256sums = 761bc77ba3c59e6c04692484be2c5c50712ff68f5f70cefe7b61a45aadbd849c
+
+pkgname = earmuff

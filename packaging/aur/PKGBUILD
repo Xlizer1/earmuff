@@ -12,7 +12,7 @@ optdepends=('headsetcontrol: about 40 more headsets'
             'pipewire: the mic test and the software equalizer'
             'wireplumber: switching the sound to a headset')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('761bc77ba3c59e6c04692484be2c5c50712ff68f5f70cefe7b61a45aadbd849c')
 
 prepare() {
   cd "$pkgname-$pkgver"
