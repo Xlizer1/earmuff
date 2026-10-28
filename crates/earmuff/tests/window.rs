@@ -8,7 +8,7 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 
 use adw::prelude::*;
-use earmuff_application::Backend;
+use earmuff_application::{Backend, EqAction, software_equalizer};
 use earmuff_domain::{Gain, NoiseFilter, Percent, UsbId};
 use earmuff_infrastructure::demo::{DemoBackend, DemoHeadset, FULL_DEMO_USB, FullHeadset};
 use support::{Outcome, ensure, find, page, run_app, until, window};
@@ -241,6 +241,44 @@ async fn scenario(
     until("the recording to play back", || support::mic_playbacks().len() == 1).await?;
     ensure(support::mic_playbacks()[0].0 == UsbId::new(0x03F0, 0x098D), "played back on the Cloud Alpha")?;
     until("the mic test to finish", || mic_test.is_sensitive() && mic_level.value() == 0.0).await?;
+
+    // the Cloud Alpha has no equalizer of its own, so Earmuff runs one on the computer
+    let cloud_alpha = UsbId::new(0x03F0, 0x098D);
+    let applied = |curve: &[Gain]| {
+        support::equalizer_actions().iter().any(|action| {
+            matches!(action, EqAction::Apply { headset, curve: c, .. } if *headset == cloud_alpha && c == curve)
+        })
+    };
+    let software: adw::SwitchRow = find(&window, "software-eq")?;
+    ensure(!software.is_active(), "the software equalizer is off at first")?;
+    software.set_active(true);
+    until("the software equalizer to start flat", || applied(&[Gain::tenths(0); 10])).await?;
+    // turning it on brings its presets and curve
+    until("its presets", || find::<adw::ComboRow>(&window, "software-eq-preset").is_ok()).await?;
+    find::<adw::ComboRow>(&window, "software-eq-preset")?.set_selected(1);
+    let bass = software_equalizer().presets[1].curve.clone();
+    until("the bass boost curve", || applied(&bass)).await?;
+    until("the curve's bands", || find::<gtk::Scale>(&window, "eq-band-0").is_ok_and(|band| band.value() == 6.0))
+        .await?;
+    find::<gtk::Scale>(&window, "eq-band-9")?.set_value(-3.0);
+    let mut own = bass.clone();
+    own[9] = Gain::tenths(-30);
+    until("a curve of the user's own", || applied(&own)).await?;
+    until("the preset to show as custom", || {
+        find::<adw::ComboRow>(&window, "software-eq-preset").is_ok_and(|row| selected_text(&row) == "Custom")
+    })
+    .await?;
+    find::<adw::SwitchRow>(&window, "software-eq")?.set_active(false);
+    until("the software equalizer to stop", || {
+        support::equalizer_actions().last() == Some(&EqAction::Stop(cloud_alpha))
+    })
+    .await?;
+    let saved =
+        std::env::var("XDG_CONFIG_HOME").map(|dir| format!("{dir}/earmuff/software-eq.json")).unwrap_or_default();
+    ensure(
+        std::fs::read_to_string(saved).is_ok_and(|text| text.contains("03f0:098d") && text.contains("-3.0")),
+        "the equalizer is saved per headset",
+    )?;
 
     // the sidebar switches to the demo headset with every feature
     let list: gtk::ListBox = find(&window, "device-list")?;

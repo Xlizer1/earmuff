@@ -1,6 +1,9 @@
 //! The PipeWire sound system: finds a headset's sound card with `pw-dump`, makes it the
 //! default with `wpctl` (WirePlumber, which remembers the choice), and records from its
-//! mic and plays on its speakers with `pw-record` and `pw-play`.
+//! mic and plays on its speakers with `pw-record` and `pw-play`. [`equalizer`] runs
+//! software equalizers in front of its speakers.
+
+pub mod equalizer;
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -44,7 +47,7 @@ impl PipeWire {
         self
     }
 
-    fn graph(&self, headset: UsbId) -> Result<Graph, String> {
+    pub(crate) fn graph(&self, headset: UsbId) -> Result<Graph, String> {
         let output = Command::new(&self.dump).output().map_err(|error| format!("couldn't run pw-dump: {error}"))?;
         if !output.status.success() {
             return Err("pw-dump failed; is PipeWire running?".into());
@@ -59,7 +62,7 @@ impl PipeWire {
             .to_vec()
     }
 
-    fn set_default(&self, node: &Node) -> Result<(), String> {
+    pub(crate) fn set_default(&self, node: &Node) -> Result<(), String> {
         let output = Command::new(&self.wpctl)
             .args(["set-default", &node.id.to_string()])
             .output()
@@ -79,7 +82,8 @@ impl PipeWire {
 impl AudioSystem for PipeWire {
     fn use_headset(&self, headset: UsbId) -> Result<Switch, String> {
         let graph = self.graph(headset)?;
-        let Some(sink) = &graph.sink else { return Ok(Switch::NotFound) };
+        // with Earmuff's equalizer in front of the headset, sound goes through that
+        let Some(sink) = graph.equalizer.as_ref().or(graph.sink.as_ref()) else { return Ok(Switch::NotFound) };
         let mut switched = false;
         if graph.default_sink.as_deref() != Some(&sink.name) {
             self.set_default(sink)?;
@@ -153,22 +157,30 @@ fn samples(bytes: &[u8]) -> Vec<i16> {
 
 /// A sink (speakers) or source (mic)
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct Node {
-    id: u64,
-    name: String,
-    description: String,
+pub(crate) struct Node {
+    pub id: u64,
+    pub name: String,
+    pub description: String,
     priority: i64,
 }
 
 /// What PipeWire knows about one headset
 #[derive(Debug, Default, PartialEq, Eq)]
-struct Graph {
+pub(crate) struct Graph {
     /// The headset's main sink and source, if it has them
-    sink: Option<Node>,
-    source: Option<Node>,
+    pub sink: Option<Node>,
+    pub source: Option<Node>,
+    /// Earmuff's equalizer in front of the headset's speakers, and the process running it
+    pub equalizer: Option<Node>,
+    pub equalizer_process: Option<i32>,
     /// The names of the current default sink and source
-    default_sink: Option<String>,
-    default_source: Option<String>,
+    pub default_sink: Option<String>,
+    pub default_source: Option<String>,
+}
+
+/// What Earmuff calls the sink of a headset's equalizer
+pub(crate) fn equalizer_name(headset: UsbId) -> String {
+    format!("earmuff_eq_{:04x}_{:04x}", headset.vendor, headset.product)
 }
 
 fn hex_id(props: &Value, key: &str) -> Option<u16> {
@@ -206,15 +218,12 @@ fn parse(dump: &str, headset: UsbId) -> Result<Graph, String> {
         .filter_map(|object| object.get("id")?.as_u64())
         .collect();
 
-    let mut graph = Graph::default();
+    let equalizer = equalizer_name(headset);
+    let (mut graph, mut equalizer_client, mut processes) = (Graph::default(), None, Vec::new());
     for object in &objects {
         match kind(object).as_str() {
             "PipeWire:Interface:Node" => {
                 let props = props(object);
-                let Some(device) = props.get("device.id").and_then(Value::as_u64) else { continue };
-                if !devices.contains(&device) {
-                    continue;
-                }
                 let text = |key: &str| props.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
                 let Some(id) = object.get("id").and_then(Value::as_u64) else { continue };
                 let node = Node {
@@ -223,6 +232,15 @@ fn parse(dump: &str, headset: UsbId) -> Result<Graph, String> {
                     description: text("node.description"),
                     priority: props.get("priority.session").and_then(Value::as_i64).unwrap_or_default(),
                 };
+                if node.name == equalizer {
+                    equalizer_client = props.get("client.id").and_then(Value::as_u64);
+                    graph.equalizer = Some(node);
+                    continue;
+                }
+                let Some(device) = props.get("device.id").and_then(Value::as_u64) else { continue };
+                if !devices.contains(&device) {
+                    continue;
+                }
                 let slot = match props.get("media.class").and_then(Value::as_str) {
                     Some("Audio/Sink") => &mut graph.sink,
                     Some("Audio/Source") => &mut graph.source,
@@ -231,6 +249,16 @@ fn parse(dump: &str, headset: UsbId) -> Result<Graph, String> {
                 // a headset with several (e.g. game and chat) uses the one PipeWire ranks first
                 if slot.as_ref().is_none_or(|other| node.priority > other.priority) {
                     *slot = Some(node);
+                }
+            }
+            "PipeWire:Interface:Client" => {
+                let props = props(object);
+                let pid = props.get("application.process.id").and_then(|pid| match pid {
+                    Value::String(text) => text.parse().ok(),
+                    number => number.as_i64().and_then(|n| i32::try_from(n).ok()),
+                });
+                if let (Some(id), Some(pid)) = (object.get("id").and_then(Value::as_u64), pid) {
+                    processes.push((id, pid));
                 }
             }
             "PipeWire:Interface:Metadata" => {
@@ -250,6 +278,8 @@ fn parse(dump: &str, headset: UsbId) -> Result<Graph, String> {
             _ => {}
         }
     }
+    graph.equalizer_process =
+        equalizer_client.and_then(|client| processes.iter().find(|(id, _)| *id == client).map(|(_, pid)| *pid));
     Ok(graph)
 }
 
@@ -257,7 +287,7 @@ fn parse(dump: &str, headset: UsbId) -> Result<Graph, String> {
 mod tests {
     use super::*;
 
-    const DUMP: &str = include_str!("../tests/data/pw-dump.json");
+    const DUMP: &str = include_str!("../../tests/data/pw-dump.json");
     const CLOUD_ALPHA: UsbId = UsbId::new(0x03F0, 0x098D);
 
     #[test]
@@ -292,6 +322,21 @@ mod tests {
         assert_eq!(graph.sink.map(|n| n.name), Some("game".into()));
         assert_eq!(graph.default_sink.as_deref(), Some("game"));
         assert_eq!(graph.source, None);
+    }
+
+    #[test]
+    fn finds_earmuffs_equalizer_and_its_process() {
+        let mut objects: Vec<Value> = serde_json::from_str(DUMP).unwrap();
+        objects.push(serde_json::json!({"id": 200, "type": "PipeWire:Interface:Node", "info": {"props": {
+            "media.class": "Audio/Sink", "node.name": "earmuff_eq_03f0_098d", "client.id": 300}}}));
+        objects.push(serde_json::json!({"id": 300, "type": "PipeWire:Interface:Client",
+            "info": {"props": {"application.process.id": 4321}}}));
+        let graph = parse(&serde_json::to_string(&objects).unwrap(), CLOUD_ALPHA).unwrap();
+        assert_eq!(graph.equalizer.map(|node| node.id), Some(200));
+        assert_eq!(graph.equalizer_process, Some(4321));
+        // another headset's equalizer isn't this one's
+        let other = parse(&serde_json::to_string(&objects).unwrap(), UsbId::new(1, 2)).unwrap();
+        assert_eq!(other.equalizer, None);
     }
 
     #[test]

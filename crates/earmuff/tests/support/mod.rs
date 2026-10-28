@@ -19,9 +19,13 @@ use std::time::{Duration, Instant};
 
 use adw::prelude::*;
 use earmuff::ui::UiOptions;
-use earmuff_application::{AudioSystem, Backend, ManagerOptions, MicRecorder, Recording, Switch};
-use earmuff_domain::UsbId;
-use earmuff_infrastructure::config::{CsvHistoryStore, JsonPreferencesStore, JsonProfileStore, XdgAutostart};
+use earmuff_application::{
+    AudioSystem, Backend, EqAction, ManagerOptions, MicRecorder, Recording, SoftwareEqualizer, Switch,
+};
+use earmuff_domain::{Gain, UsbId};
+use earmuff_infrastructure::config::{
+    CsvHistoryStore, JsonPreferencesStore, JsonProfileStore, JsonSoftwareEqStore, XdgAutostart,
+};
 use gtk::glib;
 
 const CHILD: &str = "EARMUFF_E2E_CHILD";
@@ -211,6 +215,29 @@ pub fn mic_playbacks() -> Vec<(UsbId, Recording)> {
     MIC.0.lock().unwrap().clone()
 }
 
+/// Stands in for PipeWire's equalizers, keeping track of what it was asked to do
+#[derive(Default)]
+pub struct FakeEqualizer(Mutex<Vec<EqAction>>);
+
+impl SoftwareEqualizer for FakeEqualizer {
+    fn apply(&self, headset: UsbId, name: &str, curve: &[Gain]) -> Result<bool, String> {
+        self.0.lock().unwrap().push(EqAction::Apply { headset, name: name.into(), curve: curve.to_vec() });
+        Ok(true)
+    }
+
+    fn stop(&self, headset: UsbId) -> Result<(), String> {
+        self.0.lock().unwrap().push(EqAction::Stop(headset));
+        Ok(())
+    }
+}
+
+static EQUALIZER: LazyLock<Arc<FakeEqualizer>> = LazyLock::new(Arc::default);
+
+/// What the app has asked of the software equalizer so far
+pub fn equalizer_actions() -> Vec<EqAction> {
+    EQUALIZER.0.lock().unwrap().clone()
+}
+
 /// Settings that make the app react fast enough for tests
 pub fn options(tray: bool) -> UiOptions {
     UiOptions {
@@ -225,6 +252,8 @@ pub fn options(tray: bool) -> UiOptions {
         history: Arc::new(CsvHistoryStore::in_state_dir()),
         audio: AUDIO.clone(),
         mic: MIC.clone(),
+        equalizer: EQUALIZER.clone(),
+        software_eq_store: Arc::new(JsonSoftwareEqStore::in_config_dir()),
     }
 }
 

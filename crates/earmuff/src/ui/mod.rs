@@ -12,9 +12,13 @@ use std::sync::Arc;
 use adw::prelude::*;
 use earmuff_application::{
     AudioSystem, Autostart, Backend, HistoryStore, ManagerOptions, MicRecorder, PreferencesStore, ProfileStore,
+    SoftwareEqStore, SoftwareEqualizer,
 };
-use earmuff_infrastructure::config::{CsvHistoryStore, JsonPreferencesStore, JsonProfileStore, XdgAutostart};
+use earmuff_infrastructure::config::{
+    CsvHistoryStore, JsonPreferencesStore, JsonProfileStore, JsonSoftwareEqStore, XdgAutostart,
+};
 use earmuff_infrastructure::pipewire::PipeWire;
+use earmuff_infrastructure::pipewire::equalizer::PipeWireEqualizer;
 use gtk::gio;
 
 pub const APP_ID: &str = "io.github.xlizer1.Earmuff";
@@ -45,6 +49,9 @@ pub struct UiOptions {
     pub audio: Arc<dyn AudioSystem>,
     /// Records from a headset's mic and plays it back, for the mic test
     pub mic: Arc<dyn MicRecorder>,
+    /// Runs equalizers on the computer for headsets without one of their own
+    pub equalizer: Arc<dyn SoftwareEqualizer>,
+    pub software_eq_store: Arc<dyn SoftwareEqStore>,
 }
 
 impl Default for UiOptions {
@@ -61,6 +68,8 @@ impl Default for UiOptions {
             history: Arc::new(CsvHistoryStore::in_state_dir()),
             audio: Arc::new(PipeWire::default()),
             mic: Arc::new(PipeWire::default()),
+            equalizer: Arc::new(PipeWireEqualizer::new(PipeWire::default())),
+            software_eq_store: Arc::new(JsonSoftwareEqStore::in_config_dir()),
         }
     }
 }

@@ -13,8 +13,8 @@ use std::time::Duration;
 use adw::prelude::*;
 use earmuff_application::{
     Alert, AppEvent, AudioSwitch, AudioSystem, Autostart, Backend, BatteryAlerts, BatteryHistory, DeviceManager,
-    MIC_TEST_LENGTH, MicRecorder, Preferences, PreferencesStore, Profiles, Switch, time_left_text,
-    use_headset_when_ready,
+    EqAction, EqualizerWorker, MIC_TEST_LENGTH, MicRecorder, Preferences, PreferencesStore, Profiles, SoftwareEq,
+    SoftwareEqs, Switch, time_left_text, use_headset_when_ready,
 };
 use earmuff_domain::{DeviceId, Setting, UsbId};
 use gtk::gio;
@@ -42,6 +42,7 @@ pub(super) fn open(app: &adw::Application, backends: Vec<Arc<dyn Backend>>, opti
     if options.tray {
         ui.start_tray();
     }
+    ui.start_equalizers(options);
     ui.start_manager(backends, options);
     ui.render();
     // started at login: stay in the tray (the tray shows the window if it can't start)
@@ -190,6 +191,8 @@ struct Ui {
     history: RefCell<BatteryHistory>,
     /// How far back the battery graph goes
     history_span: Cell<u64>,
+    software_eqs: RefCell<SoftwareEqs>,
+    eq_worker: RefCell<Option<EqualizerWorker>>,
 }
 
 impl Ui {
@@ -331,7 +334,47 @@ impl Ui {
             audio: options.audio.clone(),
             mic: options.mic.clone(),
             mic_testing: Cell::new(false),
+            software_eqs: RefCell::new(SoftwareEqs::new(options.software_eq_store.clone())),
+            eq_worker: RefCell::new(None),
         })
+    }
+
+    /// Software equalizers change off the main thread; what goes wrong shows as a toast
+    fn start_equalizers(self: &Rc<Self>, options: &UiOptions) {
+        let (sender, receiver) = async_channel::unbounded::<String>();
+        let worker = EqualizerWorker::start(options.equalizer.clone(), move |error| {
+            let _ = sender.send_blocking(error);
+        });
+        self.eq_worker.replace(Some(worker));
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            while let Ok(error) = receiver.recv().await {
+                let Some(ui) = weak.upgrade() else { break };
+                ui.toasts.add_toast(adw::Toast::new(&format!("Equalizer: {error}")));
+            }
+        });
+    }
+
+    /// The user changed a software equalizer: save it, run it, show it
+    fn change_software_eq(self: &Rc<Self>, device: &DeviceId, eq: SoftwareEq) {
+        let change = self.software_eqs.borrow_mut().change(device, eq.clone());
+        match change {
+            Ok(Some(action)) => {
+                if let Some(worker) = self.eq_worker.borrow().as_ref() {
+                    worker.send(action);
+                }
+            }
+            Ok(None) => {}
+            Err(error) => self.toasts.add_toast(adw::Toast::new(&format!("Couldn't save the equalizer: {error}"))),
+        }
+        self.model.borrow_mut().set_software_eq(device, Some(eq));
+        // not from inside the handler of the control that changed: turning it on adds controls
+        let weak = Rc::downgrade(self);
+        glib::idle_add_local_once(move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.render();
+            }
+        });
     }
 
     // --- app actions and preferences --------------------------------------
@@ -537,8 +580,13 @@ impl Ui {
     }
 
     /// The user changed a control: send the setting it stands for
-    fn input(&self, control: Control, input: Input) {
+    fn input(self: &Rc<Self>, control: Control, input: Input) {
         if self.syncing.get() {
+            return;
+        }
+        let software = self.model.borrow().software_eq_change(control, &input);
+        if let Some((device, eq)) = software {
+            self.change_software_eq(&device, eq);
             return;
         }
         let model = self.model.borrow();
@@ -559,7 +607,7 @@ impl Ui {
             id.remove();
         }
         let weak = Rc::downgrade(self);
-        // a curve takes longer to send, so wait a little longer for the drag to end
+        // a headset's curve takes longer to send, so wait a little longer for the drag to end
         let wait = if control == Control::Equalizer { 300 } else { 150 };
         let id = glib::timeout_add_local_once(Duration::from_millis(wait), move || {
             let Some(ui) = weak.upgrade() else { return };
@@ -586,6 +634,15 @@ impl Ui {
         glib::spawn_future_local(async move {
             while let Ok(event) = receiver.recv().await {
                 let Some(ui) = weak.upgrade() else { break };
+                // a headset without an equalizer of its own gets the software one
+                let eq_action = ui.software_eqs.borrow_mut().on_event(&event);
+                if let (Some(action), Some(worker)) = (eq_action, ui.eq_worker.borrow().as_ref()) {
+                    worker.send(action);
+                }
+                if let AppEvent::Added(info) = &event {
+                    let eq = ui.software_eqs.borrow().get(&info.id).cloned();
+                    ui.model.borrow_mut().set_software_eq(&info.id, eq);
+                }
                 let recorded = ui.history.borrow_mut().on_event(&event, now());
                 let changed = ui.model.borrow_mut().apply(&event) || recorded;
                 if changed {
@@ -1122,6 +1179,13 @@ impl Ui {
         }
         if let Some(mut manager) = self.manager.take() {
             manager.stop();
+        }
+        // software equalizers go with Earmuff, and the headsets play straight again
+        if let Some(worker) = self.eq_worker.take() {
+            for headset in self.software_eqs.borrow().running() {
+                worker.send(EqAction::Stop(headset));
+            }
+            worker.flush();
         }
         self.hold.take();
         self.app.quit();

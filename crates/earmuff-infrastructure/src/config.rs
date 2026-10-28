@@ -4,7 +4,10 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use earmuff_application::{Autostart, HistoryStore, Preferences, PreferencesStore, ProfileStore, Sample};
+use earmuff_application::{
+    Autostart, HistoryStore, Preferences, PreferencesStore, ProfileStore, Sample, SoftwareEq, SoftwareEqStore,
+    software_equalizer,
+};
 use earmuff_domain::{AutoOff, Gain, NoiseFilter, Percent, Setting, UsbId};
 use serde_json::{Map, Value, json};
 
@@ -158,12 +161,17 @@ impl JsonProfileStore {
     }
 
     fn read(&self) -> Map<String, Value> {
-        fs::read_to_string(&self.path)
-            .ok()
-            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-            .and_then(|value| value.as_object().cloned())
-            .unwrap_or_default()
+        read_object(&self.path)
     }
+}
+
+/// A JSON object from a file; empty when there's no file or it isn't one
+fn read_object(path: &Path) -> Map<String, Value> {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default()
 }
 
 impl ProfileStore for JsonProfileStore {
@@ -180,6 +188,47 @@ impl ProfileStore for JsonProfileStore {
         let saved: Map<String, Value> =
             settings.iter().filter_map(setting_to_json).map(|(key, value)| (key.to_string(), value)).collect();
         all.insert(headset.to_string(), Value::Object(saved));
+        let text = serde_json::to_string_pretty(&Value::Object(all)).map_err(|e| e.to_string())?;
+        write_atomically(&self.path, text.as_bytes()).map_err(|e| format!("{}: {e}", self.path.display()))
+    }
+}
+
+/// Each headset model's software equalizer, keyed by USB ID:
+/// `{"03f0:098d": {"enabled": true, "curve": [6.0, 4.0, …]}}`, gains in dB
+#[derive(Debug)]
+pub struct JsonSoftwareEqStore {
+    path: PathBuf,
+}
+
+impl JsonSoftwareEqStore {
+    /// $XDG_CONFIG_HOME/earmuff/software-eq.json
+    pub fn in_config_dir() -> Self {
+        JsonSoftwareEqStore::at(config_dir().join("software-eq.json"))
+    }
+
+    pub fn at(path: impl Into<PathBuf>) -> Self {
+        JsonSoftwareEqStore { path: path.into() }
+    }
+}
+
+impl SoftwareEqStore for JsonSoftwareEqStore {
+    fn load(&self, headset: UsbId) -> SoftwareEq {
+        let all = read_object(&self.path);
+        let Some(saved) = all.get(&headset.to_string()) else { return SoftwareEq::default() };
+        let spec = software_equalizer();
+        let curve: Option<Vec<Gain>> =
+            saved["curve"].as_array().map(|gains| gains.iter().filter_map(Value::as_f64).map(Gain::from_db).collect());
+        SoftwareEq {
+            enabled: saved["enabled"].as_bool().unwrap_or(false),
+            // a curve that doesn't fit (hand-edited, say) starts flat
+            curve: curve.filter(|curve| spec.check(curve).is_ok()).map_or_else(|| spec.flat(), |c| spec.snap(&c)),
+        }
+    }
+
+    fn save(&self, headset: UsbId, eq: &SoftwareEq) -> Result<(), String> {
+        let mut all = read_object(&self.path);
+        let curve: Vec<f64> = eq.curve.iter().map(|gain| gain.db()).collect();
+        all.insert(headset.to_string(), json!({ "enabled": eq.enabled, "curve": curve }));
         let text = serde_json::to_string_pretty(&Value::Object(all)).map_err(|e| e.to_string())?;
         write_atomically(&self.path, text.as_bytes()).map_err(|e| format!("{}: {e}", self.path.display()))
     }
@@ -414,6 +463,29 @@ mod tests {
             r#"{"0001:0002": {"lights": true, "mic_volume": 200, "mute_led": 9, "noise_filter": "max", "rgb": 1}}"#;
         write_atomically(&path, text.as_bytes()).unwrap();
         assert_eq!(JsonProfileStore::at(path).load(UsbId::new(1, 2)), [Setting::Lights(true)]);
+    }
+
+    #[test]
+    fn software_equalizers_are_kept_per_headset() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = JsonSoftwareEqStore::at(dir.path().join("software-eq.json"));
+        let headset = UsbId::new(0x03F0, 0x098D);
+        assert_eq!(store.load(headset), SoftwareEq::default());
+        let bass = SoftwareEq { enabled: true, curve: software_equalizer().presets[1].curve.clone() };
+        store.save(headset, &bass).unwrap();
+        assert_eq!(store.load(headset), bass);
+        assert_eq!(store.load(UsbId::new(1, 2)), SoftwareEq::default());
+    }
+
+    #[test]
+    fn a_software_equalizer_curve_that_doesnt_fit_starts_flat() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("software-eq.json");
+        let text = r#"{"0001:0002": {"enabled": true, "curve": [40, 0]}, "0003:0004": {"curve": "loud"}}"#;
+        write_atomically(&path, text.as_bytes()).unwrap();
+        let store = JsonSoftwareEqStore::at(path);
+        assert_eq!(store.load(UsbId::new(1, 2)), SoftwareEq { enabled: true, curve: software_equalizer().flat() });
+        assert_eq!(store.load(UsbId::new(3, 4)), SoftwareEq::default());
     }
 
     #[test]

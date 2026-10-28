@@ -1,7 +1,9 @@
 //! What the window shows, worked out from the device manager's events.
 //! Plain Rust with no GTK, so all of the window's logic is unit-tested here.
 
-use earmuff_application::AppEvent;
+use std::collections::HashMap;
+
+use earmuff_application::{AppEvent, SoftwareEq, software_equalizer};
 use earmuff_domain::{
     AutoOff, BackendKind, Capability, ChargeState, DeviceId, DeviceInfo, EqualizerSpec, Gain, NoiseFilter, Percent,
     Setting, Status,
@@ -71,6 +73,8 @@ pub struct Model {
     selected: Option<DeviceId>,
     problem: Option<String>,
     failure: Option<String>,
+    /// The software equalizer of each headset that can have one
+    software_eq: HashMap<DeviceId, SoftwareEq>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -97,6 +101,9 @@ pub enum Control {
     SidetoneLevel,
     EqualizerPreset,
     Equalizer,
+    SoftwareEq,
+    SoftwareEqPreset,
+    SoftwareEqCurve,
     ChatMix,
     VolumeLimiter,
     Lights,
@@ -125,6 +132,9 @@ impl Control {
             Control::SidetoneLevel => "level",
             Control::EqualizerPreset => "eq-preset",
             Control::Equalizer => "equalizer",
+            Control::SoftwareEq => "software-eq",
+            Control::SoftwareEqPreset => "software-eq-preset",
+            Control::SoftwareEqCurve => "software-eq-curve",
             Control::ChatMix => "chatmix",
             Control::VolumeLimiter => "volume-limiter",
             Control::Lights => "lights",
@@ -337,6 +347,7 @@ impl Model {
                 self.devices.iter_mut().find(|(info, _)| info.id == *id).is_some_and(|(_, status)| status.apply(event))
             }
             AppEvent::Removed(id) => {
+                self.software_eq.remove(id);
                 let before = self.devices.len();
                 self.devices.retain(|(info, _)| info.id != *id);
                 self.devices.len() != before
@@ -352,6 +363,30 @@ impl Model {
                 changed
             }
         }
+    }
+
+    /// The headset's software equalizer, or None if it can't have one
+    pub fn set_software_eq(&mut self, device: &DeviceId, eq: Option<SoftwareEq>) {
+        match eq {
+            Some(eq) => self.software_eq.insert(device.clone(), eq),
+            None => self.software_eq.remove(device),
+        };
+    }
+
+    /// The software equalizer a change to `control` asks for, on the headset the window shows
+    pub fn software_eq_change(&self, control: Control, input: &Input) -> Option<(DeviceId, SoftwareEq)> {
+        let (info, _) = self.current()?;
+        let mut eq = self.software_eq.get(&info.id)?.clone();
+        let spec = software_equalizer();
+        match (control, input) {
+            (Control::SoftwareEq, Input::Switch(on)) => eq.enabled = *on,
+            (Control::SoftwareEqPreset, Input::Choice(i)) => {
+                eq.curve = spec.presets.get(usize::try_from(*i).ok()?)?.curve.clone();
+            }
+            (Control::SoftwareEqCurve, Input::Curve(gains)) if gains.len() == spec.bands => eq.curve = spec.snap(gains),
+            _ => return None,
+        }
+        Some((info.id.clone(), eq))
     }
 
     /// The last setting a headset refused, once
@@ -435,7 +470,7 @@ impl Model {
             battery_text: s.battery.map(|b| b.to_string()).unwrap_or_default(),
             charge_text: charge_text(s).into(),
             battery_low: !charging && s.battery.is_some_and(|b| b.get() <= LOW_BATTERY),
-            sections: sections(info, s),
+            sections: sections(info, s, self.software_eq.get(&info.id)),
         })
     }
 
@@ -494,11 +529,19 @@ fn info_row(control: Control, title: &'static str, text: String) -> ControlView 
 }
 
 /// The preset list and the curve. A curve that matches no preset shows as "Custom".
-fn equalizer_controls(eq: &EqualizerSpec, s: &Status, presets: bool, curve: bool) -> Vec<Option<ControlView>> {
-    let known = s.equalizer.clone().filter(|gains| gains.len() == eq.bands);
+/// `known` is the curve in use, if that's known, and `reported` the preset the headset says
+/// it uses. `controls` are the preset and curve controls: the headset's own or the software ones.
+fn equalizer_controls(
+    eq: &EqualizerSpec,
+    known: Option<Vec<Gain>>,
+    reported: Option<usize>,
+    controls: (Control, Control),
+    presets: bool,
+    curve: bool,
+) -> Vec<Option<ControlView>> {
+    let known = known.filter(|gains| gains.len() == eq.bands);
     let preset_view = (presets && !eq.presets.is_empty()).then(|| {
         let mut options: Vec<String> = eq.presets.iter().map(|p| p.name.clone()).collect();
-        let reported = s.equalizer_preset.map(usize::from);
         let selected = match &known {
             None => reported,
             Some(gains) => reported
@@ -509,13 +552,13 @@ fn equalizer_controls(eq: &EqualizerSpec, s: &Status, presets: bool, curve: bool
                     Some(options.len() - 1)
                 }),
         };
-        choice(Control::EqualizerPreset, "Preset", options, selected)
+        choice(controls.0, "Preset", options, selected)
     });
     let curve_view = curve.then(|| {
-        let preset = s.equalizer_preset.and_then(|i| eq.presets.get(usize::from(i))).map(|p| p.curve.clone());
+        let preset = reported.and_then(|i| eq.presets.get(i)).map(|p| p.curve.clone());
         let gains = known.or(preset).filter(|gains| gains.len() == eq.bands).unwrap_or_else(|| eq.flat());
         ControlView {
-            control: Control::Equalizer,
+            control: controls.1,
             title: "Curve",
             subtitle: None,
             widget: Widget::Curve(CurveView {
@@ -536,7 +579,7 @@ fn equalizer_controls(eq: &EqualizerSpec, s: &Status, presets: bool, curve: bool
 pub const CUSTOM: &str = "Custom";
 
 /// The settings page's groups, with only the controls this headset has
-fn sections(info: &DeviceInfo, s: &Status) -> Vec<SectionView> {
+fn sections(info: &DeviceInfo, s: &Status, software_eq: Option<&SoftwareEq>) -> Vec<SectionView> {
     let has = |capability| info.supports(capability);
     let mut sections = Vec::new();
     let mut add = |tab, title, description, controls: Vec<Option<ControlView>>| {
@@ -629,12 +672,27 @@ fn sections(info: &DeviceInfo, s: &Status) -> Vec<SectionView> {
     );
 
     if let Some(eq) = &info.equalizer {
-        add(
-            Tab::Audio,
-            "Equalizer",
-            None,
-            equalizer_controls(eq, s, has(Capability::EqualizerPreset), has(Capability::Equalizer)),
-        );
+        let controls = (Control::EqualizerPreset, Control::Equalizer);
+        let (known, reported) = (s.equalizer.clone(), s.equalizer_preset.map(usize::from));
+        let (presets, curve) = (has(Capability::EqualizerPreset), has(Capability::Equalizer));
+        add(Tab::Audio, "Equalizer", None, equalizer_controls(eq, known, reported, controls, presets, curve));
+    }
+
+    if let Some(soft) = software_eq {
+        // next to a headset's own presets, say which equalizer this is
+        let own_presets =
+            has(Capability::EqualizerPreset) && info.equalizer.as_ref().is_some_and(|eq| !eq.presets.is_empty());
+        let mut controls = vec![Some(switch(
+            Control::SoftwareEq,
+            "Use the equalizer",
+            Some("Runs on this computer, for everything played through the headset"),
+            Some(soft.enabled),
+        ))];
+        if soft.enabled {
+            let ids = (Control::SoftwareEqPreset, Control::SoftwareEqCurve);
+            controls.extend(equalizer_controls(&software_equalizer(), Some(soft.curve.clone()), None, ids, true, true));
+        }
+        add(Tab::Audio, if own_presets { "Software equalizer" } else { "Equalizer" }, None, controls);
     }
 
     add(
@@ -951,6 +1009,55 @@ mod tests {
         // and picking "Custom" itself does nothing
         let model = model_with(&EQ, vec![Event::Equalizer(own)]);
         assert_eq!(model.setting(Control::EqualizerPreset, Input::Choice(2)), None);
+    }
+
+    #[test]
+    fn a_headset_without_an_equalizer_gets_the_software_one() {
+        let mut model = model_with(&CLOUD_ALPHA, vec![Event::Connected(true)]);
+        let id = info("a", &CLOUD_ALPHA).id;
+        // until the window says it can have one, it has none
+        assert!(model.view().unwrap().control(Control::SoftwareEq).is_none());
+        model.set_software_eq(&id, Some(SoftwareEq::default()));
+        let view = model.view().unwrap();
+        assert_eq!(view.control(Control::SoftwareEq).unwrap().widget, Widget::Switch(false));
+        // while it's off, only the switch shows
+        assert!(view.control(Control::SoftwareEqCurve).is_none());
+
+        let (device, on) = model.software_eq_change(Control::SoftwareEq, &Input::Switch(true)).unwrap();
+        assert_eq!((device, on.enabled), (id.clone(), true));
+        model.set_software_eq(&id, Some(on));
+        let view = model.view().unwrap();
+        assert_eq!(presets_of_control(&view, Control::SoftwareEqPreset).1, Some(0), "flat");
+        assert_eq!(curve_of_control(&view, Control::SoftwareEqCurve), software_equalizer().flat());
+
+        // a preset sets the curve; a curve of one's own is snapped and shows as custom
+        let (_, bass) = model.software_eq_change(Control::SoftwareEqPreset, &Input::Choice(1)).unwrap();
+        assert_eq!(bass.curve, software_equalizer().presets[1].curve);
+        let mut own = vec![Gain::tenths(0); 10];
+        own[9] = Gain::tenths(33);
+        let (_, mine) = model.software_eq_change(Control::SoftwareEqCurve, &Input::Curve(own)).unwrap();
+        assert_eq!(mine.curve[9], Gain::tenths(35));
+        model.set_software_eq(&id, Some(mine));
+        let (options, selected) = presets_of_control(&model.view().unwrap(), Control::SoftwareEqPreset);
+        assert_eq!((options.last().map(String::as_str), selected), (Some(CUSTOM), Some(5)));
+
+        // unplugged, it's forgotten
+        model.apply(&AppEvent::Removed(id));
+        assert!(model.software_eq_change(Control::SoftwareEq, &Input::Switch(false)).is_none());
+    }
+
+    fn curve_of_control(view: &DeviceView, control: Control) -> Vec<Gain> {
+        match &view.control(control).unwrap().widget {
+            Widget::Curve(curve) => curve.gains.clone(),
+            other => panic!("not a curve: {other:?}"),
+        }
+    }
+
+    fn presets_of_control(view: &DeviceView, control: Control) -> (Vec<String>, Option<u32>) {
+        match &view.control(control).unwrap().widget {
+            Widget::Choice { options, selected } => (options.clone(), *selected),
+            other => panic!("not a choice: {other:?}"),
+        }
     }
 
     #[test]

@@ -12,6 +12,7 @@ mod mic_test;
 mod ports;
 mod preferences;
 mod profiles;
+mod software_eq;
 mod usecases;
 
 #[cfg(test)]
@@ -25,4 +26,8 @@ pub use mic_test::{MIC_TEST_LENGTH, MicRecorder, Recording, meter};
 pub use ports::{Backend, BackendError, Session, SessionError, Waker};
 pub use preferences::{Autostart, Preferences, PreferencesStore};
 pub use profiles::{ProfileStore, Profiles, remembered};
+pub use software_eq::{
+    EqAction, EqualizerWorker, SOFTWARE_EQ_FREQUENCIES, SoftwareEq, SoftwareEqStore, SoftwareEqs, SoftwareEqualizer,
+    software_equalizer,
+};
 pub use usecases::{Found, apply_settings, discover, open_device, open_first, read_status, settle, toggle_mute};
