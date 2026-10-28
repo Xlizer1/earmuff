@@ -105,12 +105,12 @@ async fn scenario(
     notifications: Notifications,
 ) -> Outcome {
     let window = window(&app).await?;
-    let title: adw::WindowTitle = find(&window, "title")?;
+    let title: gtk::Label = find(&window, "title")?;
     let battery: gtk::Label = find(&window, "battery-label")?;
-    let mute: adw::SwitchRow = find(&window, "mute")?;
-    let mic: adw::ActionRow = find(&window, "mic")?;
-    let sidetone: adw::SwitchRow = find(&window, "sidetone")?;
-    let level_row: adw::ActionRow = find(&window, "level-row")?;
+    let mute: gtk::ToggleButton = find(&window, "mute")?;
+    let mic: gtk::Label = find(&window, "mic")?;
+    let sidetone: gtk::Switch = find(&window, "sidetone")?;
+    let level_row: gtk::Box = find(&window, "level-row")?;
     let level: gtk::Scale = find(&window, "level")?;
     let auto_off: adw::ComboRow = find(&window, "auto-off")?;
     let voice: adw::SwitchRow = find(&window, "voice-prompts")?;
@@ -119,17 +119,15 @@ async fn scenario(
     // shows the headset's settings as soon as it answers
     until("the settings page", || page(&window) == "settings").await?;
     until("the battery level", || battery.label() == "80%").await?;
-    // the color is the last value the headset reports
-    until("the color as the subtitle", || title.subtitle() == "Black/Red").await?;
-    ensure(title.title() == "Cloud Alpha Wireless (demo)", format!("title is {}", title.title()))?;
-
-    // the banner shows the headset, its state and battery
-    let hero_name: gtk::Label = find(&window, "hero-name")?;
+    // the header names the headset; the battery panel says its state, maker and color,
+    // which is the last value the headset reports
+    ensure(title.label() == "Cloud Alpha Wireless (demo)", format!("title is {}", title.label()))?;
+    let detail: gtk::Label = find(&window, "device-detail")?;
+    until("the color", || detail.label() == "HyperX · Black/Red").await?;
     let badge: gtk::Label = find(&window, "badge")?;
-    ensure(hero_name.label() == "Cloud Alpha Wireless (demo)", format!("banner says {}", hero_name.label()))?;
     ensure(badge.label() == "Connected", format!("badge says {}", badge.label()))?;
 
-    // the battery history gives a time-left estimate and a graph on the Power tab
+    // the battery history gives a time-left estimate and a graph
     let time_left: gtk::Label = find(&window, "time-left")?;
     until("the time left", || time_left.is_visible() && time_left.label().starts_with("About ")).await?;
     ensure(time_left.label().ends_with("left"), format!("time left says {}", time_left.label()))?;
@@ -186,7 +184,7 @@ async fn scenario(
     ensure(about.license_type() == gtk::License::Gpl30, "about says GPL-3.0-or-later")?;
     about.close();
     until("the about dialog to close", || find::<adw::AboutDialog>(&window, "about").is_err()).await?;
-    ensure(mic.subtitle().as_deref() == Some("Attached"), "mic boom attached")?;
+    ensure(mic.label() == "Boom attached", "mic boom attached")?;
     ensure(!mute.is_active() && !sidetone.is_active() && voice.is_active(), "switches match the headset")?;
     ensure(!level_row.is_sensitive(), "level is greyed out while monitoring is off")?;
     ensure(selected_text(&auto_off) == "20 minutes", "auto-off shows 20 minutes")?;
@@ -251,12 +249,14 @@ async fn scenario(
             matches!(action, EqAction::Apply { headset, curve: c, .. } if *headset == cloud_alpha && c == curve)
         })
     };
-    let software: adw::SwitchRow = find(&window, "software-eq")?;
+    let software: gtk::Switch = find(&window, "software-eq")?;
     ensure(!software.is_active(), "the software equalizer is off at first")?;
+    // its presets and curve are there all along, dimmed until it's on, so nothing moves
+    let presets: adw::ComboRow = find(&window, "software-eq-preset")?;
+    ensure(!presets.is_sensitive(), "the presets wait for the equalizer")?;
     software.set_active(true);
     until("the software equalizer to start flat", || applied(&[Gain::tenths(0); 10])).await?;
-    // turning it on brings its presets and curve
-    until("its presets", || find::<adw::ComboRow>(&window, "software-eq-preset").is_ok()).await?;
+    until("its presets", || presets.is_sensitive()).await?;
     find::<adw::ComboRow>(&window, "software-eq-preset")?.set_selected(1);
     let bass = software_equalizer().presets[1].curve.clone();
     until("the bass boost curve", || applied(&bass)).await?;
@@ -270,7 +270,7 @@ async fn scenario(
         find::<adw::ComboRow>(&window, "software-eq-preset").is_ok_and(|row| selected_text(&row) == "Custom")
     })
     .await?;
-    find::<adw::SwitchRow>(&window, "software-eq")?.set_active(false);
+    software.set_active(false);
     until("the software equalizer to stop", || {
         support::equalizer_actions().last() == Some(&EqAction::Stop(cloud_alpha))
     })
@@ -282,23 +282,23 @@ async fn scenario(
         "the equalizer is saved per headset",
     )?;
 
-    // the sidebar switches to the demo headset with every feature
-    let list: gtk::ListBox = find(&window, "device-list")?;
-    until("both headsets in the sidebar", || list.row_at_index(1).is_some()).await?;
-    list.select_row(list.row_at_index(1).as_ref());
-    until("the other headset", || title.title() == "Earmuff Demo Headset").await?;
+    // the switcher in the header goes to the demo headset with every feature
+    let switcher: gtk::DropDown = find(&window, "device-switcher")?;
+    until("both headsets in the switcher", || switcher.model().is_some_and(|list| list.n_items() == 2)).await?;
+    ensure(switcher.is_visible(), "the switcher shows with two headsets")?;
+    switcher.set_selected(1);
+    until("the other headset", || title.label() == "Earmuff Demo Headset").await?;
     until("its settings", || find::<adw::SwitchRow>(&window, "lights").is_ok()).await?;
     let lights: adw::SwitchRow = find(&window, "lights")?;
-    let noise: adw::ComboRow = find(&window, "noise-filter")?;
     let preset: adw::ComboRow = find(&window, "eq-preset")?;
     let mic_volume: gtk::Scale = find(&window, "mic-volume")?;
-    let chatmix: adw::ActionRow = find(&window, "chatmix")?;
+    let chatmix: gtk::Label = find(&window, "chatmix")?;
     until("the lights to show as on", || lights.is_active()).await?;
     ensure(selected_text(&preset) == "Flat", "starts on the flat preset")?;
 
     lights.set_active(false);
     until("the lights to turn off", || other.status().lights == Some(false)).await?;
-    noise.set_selected(2);
+    find::<gtk::ToggleButton>(&window, "noise-filter-2")?.set_active(true);
     until("the noise filter to go high", || other.status().noise_filter == Some(NoiseFilter::High)).await?;
     preset.set_selected(1);
     until("the bass boost preset", || other.status().equalizer_preset == Some(1)).await?;
@@ -319,7 +319,7 @@ async fn scenario(
 
     // turning the game/chat dial on the headset updates the window
     other.set_chatmix(20);
-    until("the ChatMix reading", || chatmix.subtitle().as_deref() == Some("20 (more game)")).await?;
+    until("the ChatMix reading", || chatmix.label() == "20 (more game)").await?;
     let meter: gtk::Scale = find(&window, "chatmix-meter")?;
     ensure(meter.value() == 20.0, "the balance meter follows the dial")?;
 
@@ -350,8 +350,8 @@ async fn scenario(
     )?;
 
     // and back to the Cloud Alpha
-    list.select_row(list.row_at_index(0).as_ref());
-    until("the Cloud Alpha again", || title.title() == "Cloud Alpha Wireless (demo)").await?;
+    switcher.set_selected(0);
+    until("the Cloud Alpha again", || title.label() == "Cloud Alpha Wireless (demo)").await?;
 
     // the headset turns off; a setting changes meanwhile; it turns back on
     headset.with(|sim, now| sim.set_powered(false, now));
@@ -367,7 +367,7 @@ async fn scenario(
 
     // the dongle is unplugged: the window moves on to the other headset
     headset.unplug();
-    until("the other headset", || title.title() == "Earmuff Demo Headset").await?;
+    until("the other headset", || title.label() == "Earmuff Demo Headset").await?;
     // with both unplugged it asks for a dongle
     other.unplug();
     until("the plug-in page", || page(&window) == "missing").await?;

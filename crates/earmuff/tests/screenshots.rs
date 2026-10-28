@@ -21,8 +21,10 @@ use support::{Outcome, find, page, run_app, until, window};
 const SCALE: f64 = 2.0;
 const WIDTH: i32 = 1100;
 const HEIGHT: i32 = 760;
+/// The dashboard's widest (the clamp around it)
+const MAX_WIDTH: i32 = 1100;
 /// --window-bg-color in data/style.css
-const WINDOW_BACKGROUND: &str = "#0f1015";
+const WINDOW_BACKGROUND: &str = "#0d1012";
 
 fn main() -> ExitCode {
     let Some(dir) = std::env::var_os("EARMUFF_SCREENSHOTS").map(PathBuf::from) else {
@@ -65,14 +67,26 @@ fn seed_battery_history() -> Outcome {
     std::fs::write(dir.join("battery-03f0-098d.csv"), readings).map_err(|e| e.to_string())
 }
 
-/// Draws the window's content (without the shadow around it) into a PNG, at twice its
-/// size for sharp text. The headless display only draws frames for a browser, so this
-/// asks the widgets to draw themselves.
-async fn save(window: &gtk::Window, path: &Path) -> Outcome {
+/// How tall the window must be to show the whole dashboard at `width`, without scrolling
+fn page_height(window: &gtk::Window, width: i32) -> Result<i32, String> {
+    let header: adw::HeaderBar = find(window, "header")?;
+    let dashboard: gtk::Grid = find(window, "dashboard")?;
+    let margins = dashboard.margin_start() + dashboard.margin_end();
+    let (_, header_height, _, _) = header.measure(gtk::Orientation::Vertical, width);
+    let (_, page, _, _) = dashboard.measure(gtk::Orientation::Vertical, width.min(MAX_WIDTH) - margins);
+    Ok(header_height + page + dashboard.margin_top() + dashboard.margin_bottom())
+}
+
+/// Draws the whole dashboard at `width` into a PNG, at twice the size for sharp text. The
+/// headless display only draws frames for a browser, so this lays the window out and asks
+/// the widgets to draw themselves.
+async fn save(window: &gtk::Window, path: &Path, width: i32) -> Outcome {
     let content = window.first_child().ok_or("an empty window")?;
-    let (width, height) = (WIDTH, HEIGHT);
-    // without frames there's no layout pass either, so lay the window out here
-    content.allocate(width, height, -1, None);
+    // the narrow layout isn't drawn here: libadwaita switches to it on a frame, and the
+    // headless display draws none
+    window.allocate(width, HEIGHT, -1, None);
+    let height = page_height(window, width)?.max(HEIGHT);
+    window.allocate(width, height, -1, None);
     let snapshot = gtk::Snapshot::new();
     snapshot.scale(SCALE as f32, SCALE as f32);
     // the window's own background, which its content draws on
@@ -91,19 +105,6 @@ async fn save(window: &gtk::Window, path: &Path) -> Outcome {
     Ok(())
 }
 
-/// Scrolls the settings page all the way down, or back to the top. The tabs share one
-/// scrolled page, so a scroll stays until it's undone.
-fn scroll(window: &gtk::Window, down: bool) -> Outcome {
-    let content = window.first_child().ok_or("an empty window")?;
-    // lay out first, so the scrolled page knows how tall it is
-    content.allocate(WIDTH, HEIGHT, -1, None);
-    let tabs: gtk::Widget = find(window, "tabs")?;
-    let scrolled = tabs.ancestor(gtk::ScrolledWindow::static_type()).ok_or("not on a scrolled page")?;
-    let adjustment = scrolled.downcast::<gtk::ScrolledWindow>().map_err(|_| "not scrolled")?.vadjustment();
-    adjustment.set_value(if down { adjustment.upper() - adjustment.page_size() } else { 0.0 });
-    Ok(())
-}
-
 /// Lets the window settle (animations, the battery ring) before drawing it
 async fn settle() {
     gtk::glib::timeout_future(std::time::Duration::from_millis(900)).await;
@@ -117,10 +118,9 @@ async fn shoot(app: adw::Application, dir: PathBuf, headset: DemoHeadset, other:
         settings.set_gtk_enable_animations(false);
     }
     let pages: gtk::Stack = find(&window, "pages")?;
-    let tabs: adw::ViewStack = find(&window, "tabs")?;
-    let list: gtk::ListBox = find(&window, "device-list")?;
+    let switcher: gtk::DropDown = find(&window, "device-switcher")?;
     until("the settings page", || page(&window) == "settings").await?;
-    until("both headsets", || list.row_at_index(1).is_some()).await?;
+    until("both headsets", || switcher.model().is_some_and(|list| list.n_items() == 2)).await?;
     // finish the crossfade that started before animations were off
     pages.set_visible_child_name("missing");
     pages.set_visible_child_name("settings");
@@ -128,46 +128,37 @@ async fn shoot(app: adw::Application, dir: PathBuf, headset: DemoHeadset, other:
 
     // the headset with everything, its equalizer on a preset
     other.set_chatmix(40);
-    list.select_row(list.row_at_index(1).as_ref());
+    switcher.set_selected(1);
     until("the demo headset", || find::<adw::ComboRow>(&window, "eq-preset").is_ok()).await?;
     find::<adw::ComboRow>(&window, "eq-preset")?.set_selected(2);
     until("the footsteps curve", || {
         find::<gtk::Scale>(&window, "eq-band-6").is_ok_and(|band| (band.value() - 6.0).abs() < 0.01)
     })
     .await?;
-    tabs.set_visible_child_name("audio");
     settle().await;
-    save(&window, &dir.join("overview.png")).await?;
-    scroll(&window, true)?;
-    save(&window, &dir.join("equalizer.png")).await?;
+    save(&window, &dir.join("overview.png"), WIDTH).await?;
 
-    tabs.set_visible_child_name("microphone");
-    scroll(&window, false)?;
-    settle().await;
-    save(&window, &dir.join("microphone.png")).await?;
-
-    // the Cloud Alpha Wireless: its battery history, and the software equalizer
-    list.select_row(list.row_at_index(0).as_ref());
-    until("the Cloud Alpha", || find::<adw::SwitchRow>(&window, "software-eq").is_ok()).await?;
-    tabs.set_visible_child_name("power");
-    scroll(&window, false)?;
-    settle().await;
-    save(&window, &dir.join("power.png")).await?;
-
-    find::<adw::SwitchRow>(&window, "software-eq")?.set_active(true);
-    until("the software equalizer", || find::<adw::ComboRow>(&window, "software-eq-preset").is_ok()).await?;
+    // the Cloud Alpha Wireless: muted, with the software equalizer on
+    switcher.set_selected(0);
+    until("the Cloud Alpha", || find::<gtk::Switch>(&window, "software-eq").is_ok()).await?;
+    find::<gtk::ToggleButton>(&window, "mute")?.set_active(true);
+    until("the mic to mute", || headset.with(|sim, _| sim.muted)).await?;
+    find::<gtk::Switch>(&window, "software-eq")?.set_active(true);
+    until("the software equalizer", || {
+        find::<adw::ComboRow>(&window, "software-eq-preset").is_ok_and(|row| row.is_sensitive())
+    })
+    .await?;
     find::<adw::ComboRow>(&window, "software-eq-preset")?.set_selected(1);
     until("the bass boost curve", || {
         find::<gtk::Scale>(&window, "eq-band-0").is_ok_and(|band| (band.value() - 6.0).abs() < 0.01)
     })
     .await?;
-    tabs.set_visible_child_name("audio");
     settle().await;
-    scroll(&window, true)?;
-    save(&window, &dir.join("software-eq.png")).await?;
+    save(&window, &dir.join("cloud-alpha.png"), WIDTH).await?;
 
     // put things back the way they were found, then quit
-    find::<adw::SwitchRow>(&window, "software-eq")?.set_active(false);
+    find::<gtk::Switch>(&window, "software-eq")?.set_active(false);
+    find::<gtk::ToggleButton>(&window, "mute")?.set_active(false);
     settle().await;
     window.close();
     Ok(())

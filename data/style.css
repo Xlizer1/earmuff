@@ -1,6 +1,7 @@
 /* Earmuff's look: graphite surfaces, IBM Plex Sans and one glacier-teal accent, used
-   only for what's active. Loaded automatically from the app's resources; the colors are
-   libadwaita's own variables, so every widget follows them. */
+   only for what's active. No glows, no gradients: depth comes from the surface steps and
+   hairlines. Loaded automatically from the app's resources; the colors are libadwaita's
+   own variables, so every widget follows them. See docs/brand-guidelines.md. */
 
 :root {
   --window-bg-color: #0d1012;
@@ -10,9 +11,7 @@
   --headerbar-bg-color: #0b0e10;
   --headerbar-fg-color: #e6ecee;
   --headerbar-border-color: rgb(255 255 255 / 6%);
-  --headerbar-shade-color: rgb(0 0 0 / 40%);
-  --sidebar-bg-color: #0b0e10;
-  --sidebar-fg-color: #e6ecee;
+  --headerbar-shade-color: rgb(255 255 255 / 6%);
   --card-bg-color: #14181b;
   --card-fg-color: #e6ecee;
   --dialog-bg-color: #14181b;
@@ -28,17 +27,39 @@ tooltip {
   font-family: "IBM Plex Sans", sans-serif;
 }
 
-/* Headings, the banner's name and the badges are written in sentence case and only
-   shown in capitals, so screen readers read them as words */
-preferencesgroup label.heading,
-.hero-name,
-.badge,
+/* Titles and the status badge are written in sentence case and only shown in capitals,
+   so screen readers read them as words */
+.panel-title,
+.status-badge,
 .ring-state,
-.sidebar-heading {
+preferencesgroup label.heading {
   text-transform: uppercase;
 }
 
-/* group headings: small, spaced and quiet */
+/* the header: Earmuff's mark and name, the headset switcher, the menu */
+.brand-mark {
+  color: var(--accent-color);
+}
+
+.brand-name {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.headset-name {
+  font-weight: 600;
+}
+
+/* panels: a hairline edge, no shadow */
+.panel {
+  padding: 20px;
+  border-radius: 14px;
+  background-color: var(--card-bg-color);
+  border: 1px solid rgb(255 255 255 / 6%);
+}
+
+.panel-title,
 preferencesgroup label.heading {
   font-size: 12px;
   font-weight: 600;
@@ -46,59 +67,111 @@ preferencesgroup label.heading {
   color: alpha(currentColor, 0.6);
 }
 
-/* cards: a hairline edge, no shadow */
-list.boxed-list {
+.row-title {
+  font-weight: 500;
+}
+
+.level-value {
+  font-weight: 500;
+  font-feature-settings: "tnum";
+  color: var(--accent-color);
+}
+
+/* rows inside a panel: flat, edge to edge, divided by hairlines */
+list.panel-rows {
+  background-color: transparent;
+}
+
+list.panel-rows > row {
+  background-color: transparent;
+}
+
+list.panel-rows > row:not(:last-child) {
+  border-bottom: 1px solid rgb(255 255 255 / 6%);
+}
+
+list.panel-rows > row > box.header {
+  margin-left: 0;
+  margin-right: 0;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* a choice of a few: buttons side by side, the chosen one in the accent */
+.segmented {
+  padding: 3px;
+  border-radius: 10px;
+  background-color: rgb(0 0 0 / 25%);
   border: 1px solid rgb(255 255 255 / 6%);
+}
+
+.segmented > button {
+  min-height: 30px;
+  min-width: 0;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: none;
+  box-shadow: none;
+  font-size: 13px;
+  font-weight: 600;
+  color: alpha(currentColor, 0.65);
+}
+
+.segmented > button:checked {
+  background-color: rgb(61 220 196 / 14%);
+  color: var(--accent-color);
+}
+
+/* the mic's mute: one big button, the same size either way */
+.mute-tile {
+  min-height: 76px;
+  padding: 0 16px;
+  border-radius: 12px;
+  background-color: #1a1f23;
+  border: 1px solid rgb(255 255 255 / 8%);
   box-shadow: none;
 }
 
-statuspage image.icon {
-  color: var(--accent-color);
-}
-
-levelbar block.filled {
-  background-color: var(--accent-color);
-}
-
-windowtitle .title {
-  font-weight: 600;
-}
-
-/* the banner over the tabs: headset art, name, status and battery ring */
-.hero {
-  padding: 20px 24px;
-  border-radius: 14px;
-  background-color: var(--card-bg-color);
-  border: 1px solid rgb(255 255 255 / 6%);
-}
-
-.hero-art {
-  color: var(--accent-color);
-}
-
-.hero-name {
-  font-size: 22px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-}
-
-.badge {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  padding: 2px 10px;
+.mute-tile .mute-icon {
+  padding: 11px;
   border-radius: 999px;
   color: var(--accent-color);
   background-color: rgb(61 220 196 / 12%);
 }
 
-.badge.off {
+.mute-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.mute-tile:checked {
+  background-color: color-mix(in srgb, var(--error-color) 10%, transparent);
+  border-color: color-mix(in srgb, var(--error-color) 45%, transparent);
+}
+
+.mute-tile:checked .mute-icon {
+  color: var(--error-color);
+  background-color: color-mix(in srgb, var(--error-color) 16%, transparent);
+}
+
+.mute-tile:checked .mute-title {
+  color: var(--error-color);
+}
+
+/* the battery panel */
+.status-badge {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--accent-color);
+}
+
+.status-badge.off {
   color: alpha(currentColor, 0.6);
-  background-color: rgb(255 255 255 / 6%);
 }
 
 /* the ring takes its color from here: the accent, or the warning color when low (like
-   the sidebar's battery bars), so a low battery stands out */
+   the battery bars), so a low battery stands out */
 .battery-ring {
   color: var(--accent-color);
 }
@@ -120,29 +193,12 @@ windowtitle .title {
   opacity: 0.7;
 }
 
-viewswitcher button:checked {
+statuspage image.icon {
   color: var(--accent-color);
 }
 
-/* sidebar */
-.navigation-sidebar row:selected {
-  background-color: rgb(61 220 196 / 12%);
-}
-
-.sidebar-name {
-  font-weight: 600;
-}
-
-levelbar.sidebar-battery trough {
-  min-height: 4px;
-}
-
-.sidebar-heading {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  color: alpha(currentColor, 0.6);
-  margin-left: 6px;
+levelbar block.filled {
+  background-color: var(--accent-color);
 }
 
 /* graphs and the equalizer preview draw in the accent color */

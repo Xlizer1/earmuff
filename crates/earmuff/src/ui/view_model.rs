@@ -191,50 +191,144 @@ pub struct ControlView {
     pub sensitive: bool,
 }
 
-/// The tabs of the settings page, in order
+/// The dashboard's panels, in reading order
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Tab {
-    Audio,
+pub enum Panel {
+    Battery,
     Microphone,
-    Lighting,
+    Monitoring,
+    Sound,
     Power,
+    Equalizer,
+    History,
+    Lights,
+    Device,
 }
 
-impl Tab {
-    pub const ALL: [Tab; 4] = [Tab::Audio, Tab::Microphone, Tab::Lighting, Tab::Power];
+impl Panel {
+    pub const ORDER: [Panel; 9] = [
+        Panel::Battery,
+        Panel::Microphone,
+        Panel::Monitoring,
+        Panel::Sound,
+        Panel::Power,
+        Panel::Equalizer,
+        Panel::History,
+        Panel::Lights,
+        Panel::Device,
+    ];
 
-    pub fn title(self) -> &'static str {
-        match self {
-            Tab::Audio => "Audio",
-            Tab::Microphone => "Microphone",
-            Tab::Lighting => "Lighting",
-            Tab::Power => "Power",
-        }
-    }
-
-    /// The page's name in the tab stack
+    /// The panel's widget name, which the end-to-end tests look for
     pub fn name(self) -> &'static str {
         match self {
-            Tab::Audio => "audio",
-            Tab::Microphone => "microphone",
-            Tab::Lighting => "lighting",
-            Tab::Power => "power",
+            Panel::Battery => "panel-battery",
+            Panel::Microphone => "panel-microphone",
+            Panel::Monitoring => "panel-monitoring",
+            Panel::Sound => "panel-sound",
+            Panel::Power => "panel-power",
+            Panel::Equalizer => "panel-equalizer",
+            Panel::History => "panel-history",
+            Panel::Lights => "panel-lights",
+            Panel::Device => "panel-device",
         }
     }
+}
 
-    pub fn icon(self) -> &'static str {
-        match self {
-            Tab::Audio => "earmuff-headset-symbolic",
-            Tab::Microphone => "audio-input-microphone-symbolic",
-            Tab::Lighting => "display-brightness-symbolic",
-            Tab::Power => "battery-good-symbolic",
+/// The dashboard's grid is this many columns wide
+pub const GRID_COLUMNS: i32 = 6;
+
+/// A panel's cell in the dashboard's grid
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Placement {
+    pub panel: Panel,
+    pub column: i32,
+    pub row: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// Where the panels go. Narrow: one column, in reading order. Wide: a top band, the
+/// equalizer across, then the battery history beside a stack of the small panels. A tall
+/// microphone panel spans two rows between Battery/Mic monitoring and Sound/Power; a short
+/// one sits in a row of three. Panels that share a row share its height, and the placement
+/// depends only on which panels exist, so nothing moves when a setting changes.
+pub fn placements(panels: &[Panel], tall_microphone: bool, narrow: bool) -> Vec<Placement> {
+    let present: Vec<Panel> = Panel::ORDER.into_iter().filter(|panel| panels.contains(panel)).collect();
+    let has = |panel: Panel| present.contains(&panel);
+    let pick = |wanted: &[Panel]| -> Vec<Panel> { wanted.iter().copied().filter(|p| has(*p)).collect() };
+    let mut out = Vec::new();
+    if narrow {
+        for (row, panel) in present.iter().enumerate() {
+            out.push(Placement { panel: *panel, column: 0, row: row as i32, width: GRID_COLUMNS, height: 1 });
+        }
+        return out;
+    }
+    let mut row = 0;
+    let mut overflow = Vec::new();
+    if tall_microphone && has(Panel::Microphone) {
+        let columns: Vec<Vec<Panel>> =
+            [pick(&[Panel::Battery, Panel::Monitoring]), vec![Panel::Microphone], pick(&[Panel::Sound, Panel::Power])]
+                .into_iter()
+                .filter(|column| !column.is_empty())
+                .collect();
+        let rows = columns.iter().map(Vec::len).max().unwrap_or(1) as i32;
+        let width = GRID_COLUMNS / columns.len() as i32;
+        for (index, column) in columns.iter().enumerate() {
+            stack(&mut out, column, index as i32 * width, width, row, rows);
+        }
+        row += rows;
+    } else {
+        let top = pick(&[Panel::Battery, Panel::Microphone, Panel::Monitoring, Panel::Sound, Panel::Power]);
+        let (first, rest) = top.split_at(top.len().min(3));
+        row += in_a_row(&mut out, first, row);
+        overflow.extend_from_slice(rest);
+    }
+    if has(Panel::Equalizer) {
+        out.push(Placement { panel: Panel::Equalizer, column: 0, row, width: GRID_COLUMNS, height: 1 });
+        row += 1;
+    }
+    overflow.extend(pick(&[Panel::Lights, Panel::Device]));
+    match (has(Panel::History), overflow.is_empty()) {
+        (true, true) => out.push(Placement { panel: Panel::History, column: 0, row, width: GRID_COLUMNS, height: 1 }),
+        (true, false) => {
+            let side = GRID_COLUMNS / 3;
+            let height = overflow.len() as i32;
+            out.push(Placement { panel: Panel::History, column: 0, row, width: GRID_COLUMNS - side, height });
+            stack(&mut out, &overflow, GRID_COLUMNS - side, side, row, height);
+        }
+        (false, _) => {
+            for chunk in overflow.chunks(3) {
+                row += in_a_row(&mut out, chunk, row);
+            }
         }
     }
+    out
+}
+
+/// One panel per row from `row` down, the last one filling what's left of `rows`
+fn stack(out: &mut Vec<Placement>, panels: &[Panel], column: i32, width: i32, row: i32, rows: i32) {
+    for (index, panel) in panels.iter().enumerate() {
+        let last = index + 1 == panels.len();
+        let height = if last { rows - index as i32 } else { 1 };
+        out.push(Placement { panel: *panel, column, row: row + index as i32, width, height });
+    }
+}
+
+/// Up to three panels side by side, sharing the width; returns the rows used
+fn in_a_row(out: &mut Vec<Placement>, panels: &[Panel], row: i32) -> i32 {
+    if panels.is_empty() {
+        return 0;
+    }
+    let width = GRID_COLUMNS / panels.len() as i32;
+    for (index, panel) in panels.iter().enumerate() {
+        out.push(Placement { panel: *panel, column: index as i32 * width, row, width, height: 1 });
+    }
+    1
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SectionView {
-    pub tab: Tab,
+    pub panel: Panel,
     pub title: &'static str,
     pub description: Option<&'static str>,
     pub controls: Vec<ControlView>,
@@ -263,9 +357,9 @@ pub struct DeviceView {
 /// Battery at or below this is shown as low
 pub const LOW_BATTERY: u8 = 15;
 
-/// One headset in the sidebar
+/// One headset in the headset switcher
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SidebarItem {
+pub struct HeadsetItem {
     pub id: DeviceId,
     pub name: String,
     pub status: String,
@@ -289,14 +383,29 @@ impl DeviceView {
         self.sections.iter().flat_map(|section| &section.controls).find(|c| c.control == control)
     }
 
-    /// The tabs this headset needs, in order. Power also holds the battery history.
-    pub fn tabs(&self) -> Vec<Tab> {
-        Tab::ALL
+    /// The panels this headset has, in reading order. Battery and its history have no
+    /// controls of their own: they come with a battery.
+    pub fn panels(&self) -> Vec<Panel> {
+        Panel::ORDER
             .into_iter()
-            .filter(|tab| {
-                self.sections.iter().any(|section| section.tab == *tab) || (*tab == Tab::Power && self.has_battery)
+            .filter(|panel| match panel {
+                Panel::Battery | Panel::History => self.has_battery,
+                panel => self.sections.iter().any(|section| section.panel == *panel),
             })
             .collect()
+    }
+
+    /// A microphone panel with this many controls takes two rows
+    const TALL_MICROPHONE: usize = 5;
+
+    pub fn placements(&self, narrow: bool) -> Vec<Placement> {
+        let microphone = self.sections.iter().find(|section| section.panel == Panel::Microphone);
+        let tall = microphone.is_some_and(|section| section.controls.len() >= Self::TALL_MICROPHONE);
+        placements(&self.panels(), tall, narrow)
+    }
+
+    pub fn section(&self, panel: Panel) -> Option<&SectionView> {
+        self.sections.iter().find(|section| section.panel == panel)
     }
 }
 
@@ -385,11 +494,11 @@ impl Model {
         self.devices.iter().map(|(info, _)| info)
     }
 
-    /// Every connected headset, for the sidebar
-    pub fn sidebar(&self) -> Vec<SidebarItem> {
+    /// Every connected headset, for the headset switcher
+    pub fn headsets(&self) -> Vec<HeadsetItem> {
         self.devices
             .iter()
-            .map(|(info, s)| SidebarItem {
+            .map(|(info, s)| HeadsetItem {
                 id: info.id.clone(),
                 name: info.name.clone(),
                 status: match (s.connected, s.battery) {
@@ -569,15 +678,17 @@ pub const CUSTOM: &str = "Custom";
 fn sections(info: &DeviceInfo, s: &Status, software_eq: Option<&SoftwareEq>) -> Vec<SectionView> {
     let has = |capability| info.supports(capability);
     let mut sections = Vec::new();
-    let mut add = |tab, title, description, controls: Vec<Option<ControlView>>| {
+    let mut add = |panel, title, description, controls: Vec<Option<ControlView>>| {
         let controls: Vec<ControlView> = controls.into_iter().flatten().collect();
         if !controls.is_empty() {
-            sections.push(SectionView { tab, title, description, controls });
+            sections.push(SectionView { panel, title, description, controls });
         }
     };
 
+    // any headset with a sound card can be tested, whatever else its mic can do
+    let muted = s.mic_muted == Some(true);
     add(
-        Tab::Microphone,
+        Panel::Microphone,
         "Microphone",
         None,
         vec![
@@ -585,8 +696,8 @@ fn sections(info: &DeviceInfo, s: &Status, software_eq: Option<&SoftwareEq>) -> 
                 .then(|| switch(Control::Mute, "Mute", Some("Same as the mute button on the headset"), s.mic_muted)),
             has(Capability::MicAttached).then(|| {
                 let text = match s.mic_attached {
-                    Some(true) => "Attached",
-                    Some(false) => "Not attached",
+                    Some(true) => "Boom attached",
+                    Some(false) => "Boom not attached",
                     None => "",
                 };
                 info_row(Control::MicAttached, "Mic boom", text.into())
@@ -596,41 +707,28 @@ fn sections(info: &DeviceInfo, s: &Status, software_eq: Option<&SoftwareEq>) -> 
                 let options = NOISE_FILTERS.map(String::from).to_vec();
                 choice(Control::NoiseFilter, "Noise filter", options, s.noise_filter.map(|f| usize::from(f.level())))
             }),
-            has(Capability::RotateToMute).then(|| {
-                switch(
-                    Control::RotateToMute,
-                    "Mute when raised",
-                    Some("Mutes when you flip the mic up"),
-                    s.rotate_to_mute,
-                )
-            }),
             has(Capability::MicMuteLedBrightness).then(|| {
                 let options = MUTE_LED_LEVELS.map(String::from).to_vec();
                 choice(Control::MuteLed, "Mute light", options, s.mic_mute_led_brightness.map(usize::from))
             }),
+            has(Capability::RotateToMute).then(|| {
+                switch(Control::RotateToMute, "Mute when raised", Some("Flip the mic up to mute it"), s.rotate_to_mute)
+            }),
+            Some(ControlView {
+                control: Control::MicTest,
+                title: "Test your mic",
+                subtitle: Some(if muted { "Unmute the mic first" } else { "Record and play back five seconds" }),
+                widget: Widget::MicTest,
+                sensitive: !muted,
+            }),
         ],
-    );
-
-    // any headset with a sound card can be tested, whatever else its mic can do
-    let muted = s.mic_muted == Some(true);
-    add(
-        Tab::Microphone,
-        "Mic test",
-        None,
-        vec![Some(ControlView {
-            control: Control::MicTest,
-            title: "Test your mic",
-            subtitle: Some(if muted { "Unmute the mic first" } else { "Records five seconds, then plays them back" }),
-            widget: Widget::MicTest,
-            sensitive: !muted,
-        })],
     );
 
     let sidetone_on = s.sidetone.unwrap_or(false);
     add(
-        Tab::Audio,
+        Panel::Monitoring,
         "Mic monitoring",
-        Some("Hear your own voice in the headset while you talk"),
+        Some("Hear your own voice in the headset while you talk."),
         vec![
             has(Capability::Sidetone).then(|| switch(Control::Sidetone, "Mic monitoring", None, s.sidetone)),
             has(Capability::SidetoneLevel).then(|| ControlView {
@@ -640,8 +738,16 @@ fn sections(info: &DeviceInfo, s: &Status, software_eq: Option<&SoftwareEq>) -> 
         ],
     );
 
+    // a headset with presets but no curve of its own picks them here; the software
+    // equalizer, if it has one, takes the equalizer panel
+    let presets_only = !has(Capability::Equalizer) && has(Capability::EqualizerPreset);
+    let preset_row = info.equalizer.as_ref().filter(|_| presets_only).and_then(|eq| {
+        let controls = (Control::EqualizerPreset, Control::Equalizer);
+        let reported = s.equalizer_preset.map(usize::from);
+        equalizer_controls(eq, s.equalizer.clone(), reported, controls, true, false).into_iter().flatten().next()
+    });
     add(
-        Tab::Audio,
+        Panel::Sound,
         "Sound",
         None,
         vec![
@@ -652,45 +758,34 @@ fn sections(info: &DeviceInfo, s: &Status, software_eq: Option<&SoftwareEq>) -> 
                 widget: Widget::Balance(s.chatmix),
                 sensitive: true,
             }),
+            preset_row.map(|row| ControlView { title: "Equalizer preset", ..row }),
             has(Capability::VolumeLimiter).then(|| {
                 switch(Control::VolumeLimiter, "Volume limiter", Some("Keeps loud sounds in check"), s.volume_limiter)
             }),
         ],
     );
 
-    if let Some(eq) = &info.equalizer {
+    if let (Some(eq), true) = (&info.equalizer, has(Capability::Equalizer)) {
         let controls = (Control::EqualizerPreset, Control::Equalizer);
         let (known, reported) = (s.equalizer.clone(), s.equalizer_preset.map(usize::from));
-        let (presets, curve) = (has(Capability::EqualizerPreset), has(Capability::Equalizer));
-        add(Tab::Audio, "Equalizer", None, equalizer_controls(eq, known, reported, controls, presets, curve));
-    }
-
-    if let Some(soft) = software_eq {
-        // next to a headset's own presets, say which equalizer this is
-        let own_presets =
-            has(Capability::EqualizerPreset) && info.equalizer.as_ref().is_some_and(|eq| !eq.presets.is_empty());
+        let presets = has(Capability::EqualizerPreset);
+        add(Panel::Equalizer, "Equalizer", None, equalizer_controls(eq, known, reported, controls, presets, true));
+    } else if let Some(soft) = software_eq {
         let mut controls = vec![Some(switch(
             Control::SoftwareEq,
             "Use the equalizer",
             Some("Runs on this computer, for everything played through the headset"),
             Some(soft.enabled),
         ))];
-        if soft.enabled {
-            let ids = (Control::SoftwareEqPreset, Control::SoftwareEqCurve);
-            controls.extend(equalizer_controls(&software_equalizer(), Some(soft.curve.clone()), None, ids, true, true));
-        }
-        add(Tab::Audio, if own_presets { "Software equalizer" } else { "Equalizer" }, None, controls);
+        // while it's off, its presets and curve stay in place, dimmed, so nothing moves
+        let ids = (Control::SoftwareEqPreset, Control::SoftwareEqCurve);
+        let parts = equalizer_controls(&software_equalizer(), Some(soft.curve.clone()), None, ids, true, true);
+        controls.extend(parts.into_iter().map(|part| part.map(|c| ControlView { sensitive: soft.enabled, ..c })));
+        add(Panel::Equalizer, "Equalizer", Some("On this computer"), controls);
     }
 
     add(
-        Tab::Lighting,
-        "Lighting",
-        None,
-        vec![has(Capability::Lights).then(|| switch(Control::Lights, "Lights", None, s.lights))],
-    );
-
-    add(
-        Tab::Power,
+        Panel::Power,
         "Power and sounds",
         None,
         vec![
@@ -714,13 +809,20 @@ fn sections(info: &DeviceInfo, s: &Status, software_eq: Option<&SoftwareEq>) -> 
         ],
     );
 
+    let lights = has(Capability::Lights);
+    let bluetooth = has(Capability::BtWhenPoweredOn) || has(Capability::BtCallVolume);
     add(
-        Tab::Power,
-        "Bluetooth",
+        Panel::Lights,
+        match (lights, bluetooth) {
+            (true, true) => "Lights and Bluetooth",
+            (true, false) => "Lights",
+            _ => "Bluetooth",
+        },
         None,
         vec![
+            lights.then(|| switch(Control::Lights, "Lights", None, s.lights)),
             has(Capability::BtWhenPoweredOn)
-                .then(|| switch(Control::BtWhenPoweredOn, "Turn on with the headset", None, s.bt_when_powered_on)),
+                .then(|| switch(Control::BtWhenPoweredOn, "Bluetooth on with the headset", None, s.bt_when_powered_on)),
             has(Capability::BtCallVolume).then(|| level(Control::BtCallVolume, "Call volume", s.bt_call_volume)),
         ],
     );
@@ -733,8 +835,8 @@ fn sections(info: &DeviceInfo, s: &Status, software_eq: Option<&SoftwareEq>) -> 
     let model =
         if info.name.starts_with(&info.vendor) { info.name.clone() } else { format!("{} {}", info.vendor, info.name) };
     add(
-        Tab::Power,
-        "About this headset",
+        Panel::Device,
+        "This headset",
         None,
         vec![
             Some(info_row(Control::Model, "Model", model)),
@@ -889,7 +991,7 @@ mod tests {
         let model = model_with(&CLOUD_ALPHA, vec![Event::Connected(true), Event::Sidetone(false)]);
         let view = model.view().unwrap();
         let titles: Vec<&str> = view.sections.iter().map(|s| s.title).collect();
-        assert_eq!(titles, ["Microphone", "Mic test", "Mic monitoring", "Power and sounds", "About this headset"]);
+        assert_eq!(titles, ["Microphone", "Mic monitoring", "Power and sounds", "This headset"]);
         let controls: Vec<Control> = view.layout().iter().map(|(c, _)| *c).collect();
         assert_eq!(
             controls,
@@ -914,7 +1016,10 @@ mod tests {
             "level is greyed out while monitoring is off"
         );
         assert!(view.has_battery);
-        assert_eq!(view.tabs(), [Tab::Audio, Tab::Microphone, Tab::Power]);
+        assert_eq!(
+            view.panels(),
+            [Panel::Battery, Panel::Microphone, Panel::Monitoring, Panel::Power, Panel::History, Panel::Device]
+        );
     }
 
     #[test]
@@ -924,7 +1029,7 @@ mod tests {
             let control = model.view().unwrap().control(Control::MicTest).cloned().unwrap();
             (control.sensitive, control.subtitle.unwrap())
         };
-        assert_eq!(test(false), (true, "Records five seconds, then plays them back"));
+        assert_eq!(test(false), (true, "Record and play back five seconds"));
         assert_eq!(test(true), (false, "Unmute the mic first"));
     }
 
@@ -957,7 +1062,10 @@ mod tests {
         // without an on/off switch, the sidetone level is always adjustable
         assert!(view.control(Control::SidetoneLevel).unwrap().sensitive);
         assert!(view.control(Control::Lights).is_some() && view.control(Control::BtCallVolume).is_some());
-        assert_eq!(view.tabs(), Tab::ALL);
+        // presets without a curve of their own are picked in the sound panel
+        assert_eq!(view.section(Panel::Sound).unwrap().controls[1].control, Control::EqualizerPreset);
+        assert_eq!(view.section(Panel::Lights).unwrap().title, "Lights and Bluetooth");
+        assert_eq!(view.panels(), [Panel::Microphone, Panel::Monitoring, Panel::Sound, Panel::Lights, Panel::Device]);
     }
 
     fn curve_of(view: &DeviceView) -> Vec<Gain> {
@@ -1007,8 +1115,9 @@ mod tests {
         model.set_software_eq(&id, Some(SoftwareEq::default()));
         let view = model.view().unwrap();
         assert_eq!(view.control(Control::SoftwareEq).unwrap().widget, Widget::Switch(false));
-        // while it's off, only the switch shows
-        assert!(view.control(Control::SoftwareEqCurve).is_none());
+        // while it's off, its presets and curve stay in place, dimmed
+        assert!(!view.control(Control::SoftwareEqCurve).unwrap().sensitive);
+        assert!(!view.control(Control::SoftwareEqPreset).unwrap().sensitive);
 
         let (device, on) = model.software_eq_change(Control::SoftwareEq, &Input::Switch(true)).unwrap();
         assert_eq!((device, on.enabled), (id.clone(), true));
@@ -1077,18 +1186,91 @@ mod tests {
     }
 
     #[test]
-    fn the_sidebar_lists_every_headset() {
+    fn the_switcher_lists_every_headset() {
         let mut model = Model::default();
         model.apply(&AppEvent::Added(alpha("a")));
         model.apply(&AppEvent::Added(alpha("b")));
         model.apply(&changed("a", Event::Connected(true)));
         model.apply(&changed("a", Event::Battery(Percent::saturating(80))));
         model.apply(&changed("b", Event::Connected(false)));
-        let items = model.sidebar();
+        let items = model.headsets();
         assert_eq!(items.iter().map(|i| i.status.as_str()).collect::<Vec<_>>(), ["80%", "Off"]);
         assert_eq!((items[0].name.as_str(), items[0].battery), ("Headset a", Some(80)));
         model.apply(&changed("a", Event::Charge(ChargeState::Charging)));
-        assert_eq!(model.sidebar()[0].status, "80% · charging");
+        assert_eq!(model.headsets()[0].status, "80% · charging");
+    }
+
+    fn cell(placements: &[Placement], panel: Panel) -> (i32, i32, i32, i32) {
+        let p = placements.iter().find(|p| p.panel == panel).unwrap_or_else(|| panic!("{panel:?} isn't placed"));
+        (p.column, p.row, p.width, p.height)
+    }
+
+    #[test]
+    fn a_tall_microphone_panel_spans_two_rows_between_two_stacks() {
+        let every = Panel::ORDER;
+        let wide = placements(&every, true, false);
+        assert_eq!(cell(&wide, Panel::Battery), (0, 0, 2, 1));
+        assert_eq!(cell(&wide, Panel::Monitoring), (0, 1, 2, 1));
+        assert_eq!(cell(&wide, Panel::Microphone), (2, 0, 2, 2));
+        assert_eq!(cell(&wide, Panel::Sound), (4, 0, 2, 1));
+        assert_eq!(cell(&wide, Panel::Power), (4, 1, 2, 1));
+        assert_eq!(cell(&wide, Panel::Equalizer), (0, 2, 6, 1));
+        // the history beside the small panels, as tall as they are together
+        assert_eq!(cell(&wide, Panel::History), (0, 3, 4, 2));
+        assert_eq!(cell(&wide, Panel::Lights), (4, 3, 2, 1));
+        assert_eq!(cell(&wide, Panel::Device), (4, 4, 2, 1));
+    }
+
+    #[test]
+    fn a_short_microphone_panel_sits_in_a_row_of_three() {
+        // the Cloud Alpha Wireless with the software equalizer
+        let panels = [
+            Panel::Battery,
+            Panel::Microphone,
+            Panel::Monitoring,
+            Panel::Power,
+            Panel::Equalizer,
+            Panel::History,
+            Panel::Device,
+        ];
+        let wide = placements(&panels, false, false);
+        assert_eq!(cell(&wide, Panel::Battery), (0, 0, 2, 1));
+        assert_eq!(cell(&wide, Panel::Microphone), (2, 0, 2, 1));
+        assert_eq!(cell(&wide, Panel::Monitoring), (4, 0, 2, 1));
+        assert_eq!(cell(&wide, Panel::Equalizer), (0, 1, 6, 1));
+        // power moves down beside the history
+        assert_eq!(cell(&wide, Panel::History), (0, 2, 4, 2));
+        assert_eq!(cell(&wide, Panel::Power), (4, 2, 2, 1));
+        assert_eq!(cell(&wide, Panel::Device), (4, 3, 2, 1));
+    }
+
+    #[test]
+    fn panels_widen_to_fill_their_row_and_stack_on_narrow_windows() {
+        // a wired headset: no battery, so no history either
+        let panels = [Panel::Microphone, Panel::Monitoring, Panel::Equalizer, Panel::Device];
+        let wide = placements(&panels, false, false);
+        assert_eq!(cell(&wide, Panel::Microphone), (0, 0, 3, 1));
+        assert_eq!(cell(&wide, Panel::Monitoring), (3, 0, 3, 1));
+        assert_eq!(cell(&wide, Panel::Device), (0, 2, 6, 1));
+        let narrow = placements(&panels, false, true);
+        let order: Vec<(Panel, i32, i32)> = narrow.iter().map(|p| (p.panel, p.row, p.width)).collect();
+        assert_eq!(
+            order,
+            [
+                (Panel::Microphone, 0, GRID_COLUMNS),
+                (Panel::Monitoring, 1, GRID_COLUMNS),
+                (Panel::Equalizer, 2, GRID_COLUMNS),
+                (Panel::Device, 3, GRID_COLUMNS)
+            ]
+        );
+    }
+
+    #[test]
+    fn the_layout_depends_on_what_the_headset_has_not_on_its_state() {
+        let placed = |events: Vec<Event>| model_with(&CLOUD_ALPHA, events).view().unwrap().placements(false);
+        let on = placed(vec![Event::Connected(true), Event::MicMuted(false), Event::Sidetone(true)]);
+        let muted = placed(vec![Event::Connected(true), Event::MicMuted(true), Event::Sidetone(false)]);
+        assert_eq!(on, muted);
     }
 
     #[test]

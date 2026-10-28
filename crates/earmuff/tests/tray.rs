@@ -185,7 +185,7 @@ async fn scenario(app: adw::Application, headset: DemoHeadset, watcher: Watcher,
     support::ensure(!checked, "mute starts unchecked")?;
     click(&bus, &service, &menu_path, mute).await?;
     until("the headset to mute", || headset.with(|sim, _| sim.muted)).await?;
-    let mute_row: adw::SwitchRow = find(&window, "mute")?;
+    let mute_row: gtk::ToggleButton = find(&window, "mute")?;
     until("the window's switch to follow", || mute_row.is_active()).await?;
     let mut checked = false;
     for _ in 0..500 {
