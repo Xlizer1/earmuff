@@ -20,6 +20,8 @@ async-channel = "2.5.0"
 clap = { version = "4.6.7", features = ["derive"] }
 gtk = { version = "0.11.5", package = "gtk4", features = ["v4_16"] }
 ksni = { version = "0.3.7", default-features = false, features = ["async-io"] }
+# the same pango as gtk's; 1.56 can load a font file the app ships
+pango = { version = "0.22.9", features = ["v1_56"] }
 rustix = { version = "1.1.6", features = ["event", "process"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
 tempfile = "3"

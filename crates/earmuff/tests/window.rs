@@ -149,15 +149,17 @@ async fn scenario(
     provider.load_from_resource(&format!("{}/style.css", earmuff::ui::RESOURCE_PATH));
     ensure(errors.borrow().is_empty(), format!("stylesheet errors: {:?}", errors.borrow()))?;
 
-    // Preferences (Ctrl+,) changes the accent color, and remembers it
+    // Preferences (Ctrl+,) are saved as they change
     app.activate_action("preferences", None);
-    until("the preferences dialog", || find::<adw::ComboRow>(&window, "accent").is_ok()).await?;
-    find::<adw::ComboRow>(&window, "accent")?.set_selected(1);
-    until("the cyan accent", || window.has_css_class("accent-cyan")).await?;
+    until("the preferences dialog", || find::<adw::ComboRow>(&window, "battery-alert").is_ok()).await?;
+    find::<adw::ComboRow>(&window, "battery-alert")?.set_selected(4);
     let saved =
         std::env::var("XDG_CONFIG_HOME").map(|dir| format!("{dir}/earmuff/preferences.json")).unwrap_or_default();
-    let saved = std::fs::read_to_string(&saved).unwrap_or_default();
-    ensure(saved.contains("\"cyan\""), format!("preferences file says {saved:?}"))?;
+    until("the saved warning level", || {
+        std::fs::read_to_string(&saved).is_ok_and(|text| text.contains("\"battery_alert\": 30"))
+    })
+    .await?;
+    find::<adw::ComboRow>(&window, "battery-alert")?.set_selected(3);
     // ...and starting at login writes an autostart entry that starts hidden
     let entry = std::env::var("XDG_CONFIG_HOME")
         .map(|dir| std::path::PathBuf::from(dir).join("autostart/io.github.xlizer1.Earmuff.desktop"))

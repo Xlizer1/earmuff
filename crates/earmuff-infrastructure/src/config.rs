@@ -68,13 +68,11 @@ impl PreferencesStore for JsonPreferencesStore {
     fn load(&self) -> Preferences {
         let saved = self.read();
         let defaults = Preferences::default();
-        let text = |key: &str, default: String| saved.get(key).and_then(Value::as_str).map_or(default, String::from);
         let flag = |key: &str, default: bool| saved.get(key).and_then(Value::as_bool).unwrap_or(default);
         let number = |key: &str, default: u8| {
             saved.get(key).and_then(Value::as_u64).and_then(|n| u8::try_from(n).ok()).unwrap_or(default)
         };
         Preferences {
-            accent: text("accent", defaults.accent),
             battery_alert: number("battery_alert", defaults.battery_alert).min(100),
             notify_charged: flag("notify_charged", defaults.notify_charged),
             remember_settings: flag("remember_settings", defaults.remember_settings),
@@ -85,7 +83,6 @@ impl PreferencesStore for JsonPreferencesStore {
     fn save(&self, preferences: &Preferences) -> Result<(), String> {
         let mut saved = self.read();
         let current = json!({
-            "accent": preferences.accent,
             "battery_alert": preferences.battery_alert,
             "notify_charged": preferences.notify_charged,
             "remember_settings": preferences.remember_settings,
@@ -359,13 +356,8 @@ mod tests {
     #[test]
     fn saves_and_loads() {
         let (_dir, store) = store();
-        let saved = Preferences {
-            accent: "cyan".into(),
-            battery_alert: 15,
-            notify_charged: false,
-            remember_settings: false,
-            switch_audio: true,
-        };
+        let saved =
+            Preferences { battery_alert: 15, notify_charged: false, remember_settings: false, switch_audio: true };
         store.save(&saved).unwrap();
         assert_eq!(store.load(), saved);
     }
@@ -375,7 +367,7 @@ mod tests {
         let (_dir, store) = store();
         write_atomically(&store.path, b"{ not json").unwrap();
         assert_eq!(store.load(), Preferences::default());
-        write_atomically(&store.path, b"{\"accent\": 7}").unwrap();
+        write_atomically(&store.path, b"{\"battery_alert\": \"lots\"}").unwrap();
         assert_eq!(store.load(), Preferences::default());
     }
 
@@ -385,7 +377,7 @@ mod tests {
         write_atomically(&store.path, b"{\"from_the_future\": true}").unwrap();
         store.save(&Preferences::default()).unwrap();
         let text = fs::read_to_string(&store.path).unwrap();
-        assert!(text.contains("from_the_future") && text.contains("accent"));
+        assert!(text.contains("from_the_future") && text.contains("battery_alert"));
     }
 
     #[test]

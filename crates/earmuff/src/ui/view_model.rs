@@ -14,15 +14,6 @@ pub const WAITING: &str = "Waiting for the headset…";
 pub const AUTO_OFF_MINUTES: [u8; 6] = [0, 10, 20, 30, 60, 90];
 const MUTE_LED_LEVELS: [&str; 4] = ["Off", "Dim", "Medium", "Bright"];
 
-/// Accent colors offered in Preferences: the name saved in the preferences, and its label
-pub const ACCENTS: [(&str, &str); 5] =
-    [("red", "Red"), ("cyan", "Cyan"), ("green", "Green"), ("purple", "Purple"), ("orange", "Orange")];
-
-/// The window's CSS class for an accent; red is the stylesheet's default and needs none
-pub fn accent_class(name: &str) -> Option<String> {
-    (name != "red" && ACCENTS.iter().any(|(known, _)| *known == name)).then(|| format!("accent-{name}"))
-}
-
 /// The low-battery warning levels offered in Preferences; 0 is off
 pub const BATTERY_ALERTS: [u8; 5] = [0, 10, 15, 20, 30];
 
@@ -59,10 +50,6 @@ pub fn autostart_hint(desktop: &str) -> Option<&'static str> {
     }
 }
 
-/// Where an accent sits in the Preferences list; unknown names show as red
-pub fn accent_index(name: &str) -> u32 {
-    ACCENTS.iter().position(|(known, _)| *known == name).unwrap_or(0) as u32
-}
 const NOISE_FILTERS: [&str; 3] = ["Off", "Low", "High"];
 
 /// The headsets the device manager reported, which one the window shows, and
@@ -1171,15 +1158,6 @@ mod tests {
         assert!(autostart_hint("sway").unwrap().contains("exec earmuff --hidden"));
         assert_eq!(autostart_hint("GNOME"), None);
         assert_eq!(autostart_hint("KDE"), None);
-    }
-
-    #[test]
-    fn accents_map_to_css_classes() {
-        assert_eq!(accent_class("red"), None);
-        assert_eq!(accent_class("cyan").as_deref(), Some("accent-cyan"));
-        assert_eq!(accent_class("chartreuse"), None);
-        assert_eq!(accent_index("purple"), 3);
-        assert_eq!(accent_index("chartreuse"), 0);
     }
 
     #[test]

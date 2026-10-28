@@ -25,8 +25,8 @@ use super::battery_graph::{BatteryGraph, DAY, WEEK};
 use super::battery_ring::BatteryRing;
 use super::equalizer::EqualizerEditor;
 use super::view_model::{
-    ACCENTS, BATTERY_ALERTS, Control, ControlView, DeviceView, Input, Model, Page, SidebarItem, Tab, Widget,
-    accent_class, accent_index, alert_text, autostart_hint, battery_alert_index, battery_alert_label,
+    BATTERY_ALERTS, Control, ControlView, DeviceView, Input, Model, Page, SidebarItem, Tab, Widget, alert_text,
+    autostart_hint, battery_alert_index, battery_alert_label,
 };
 use super::{APP_ID, RESOURCE_PATH, UiOptions};
 use crate::tray::{HeadsetTray, TrayEvent, TrayState};
@@ -35,10 +35,10 @@ use crate::tray::{HeadsetTray, TrayEvent, TrayState};
 pub(super) fn open(app: &adw::Application, backends: Vec<Arc<dyn Backend>>, options: &UiOptions) {
     // the gaming look is dark, whatever the desktop's style
     adw::StyleManager::default().set_color_scheme(adw::ColorScheme::ForceDark);
+    super::fonts::register();
     let ui = Ui::new(app, options);
     ui.connect_signals();
     ui.install_actions();
-    ui.apply_accent();
     if options.tray {
         ui.start_tray();
     }
@@ -408,23 +408,6 @@ impl Ui {
     }
 
     fn show_preferences(self: &Rc<Self>) {
-        let labels: Vec<&str> = ACCENTS.iter().map(|(_, label)| *label).collect();
-        let accent = adw::ComboRow::builder()
-            .name("accent")
-            .title("Accent color")
-            .model(&gtk::StringList::new(&labels))
-            .selected(accent_index(&self.preferences.borrow().accent))
-            .build();
-        let weak = Rc::downgrade(self);
-        accent.connect_selected_notify(move |row| {
-            if let (Some(ui), Some((name, _))) = (weak.upgrade(), ACCENTS.get(row.selected() as usize)) {
-                ui.update_preferences(|preferences| preferences.accent = (*name).into());
-                ui.apply_accent();
-            }
-        });
-        let appearance = adw::PreferencesGroup::builder().title("Appearance").build();
-        appearance.add(&accent);
-
         let login = adw::SwitchRow::builder()
             .name("start-on-login")
             .title("Start when you log in")
@@ -500,7 +483,6 @@ impl Ui {
         notifications.add(&charged);
 
         let page = adw::PreferencesPage::builder().title("General").icon_name("preferences-system-symbolic").build();
-        page.add(&appearance);
         page.add(&headsets);
         page.add(&notifications);
         page.add(&startup);
@@ -529,6 +511,12 @@ impl Ui {
             ],
         );
         about.add_legal_section("Trademarks", None, gtk::License::Custom, Some(TRADEMARKS));
+        about.add_legal_section(
+            "IBM Plex Sans",
+            Some("© 2017 IBM Corp., with Reserved Font Name \"Plex\""),
+            gtk::License::Custom,
+            Some("Licensed under the SIL Open Font License, Version 1.1."),
+        );
         about.present(Some(&self.window));
     }
 
@@ -540,15 +528,6 @@ impl Ui {
         self.audio_switch.borrow_mut().set_enabled(self.preferences.borrow().switch_audio);
         if let Err(error) = self.store.save(&self.preferences.borrow()) {
             self.toasts.add_toast(adw::Toast::new(&format!("Couldn't save preferences: {error}")));
-        }
-    }
-
-    fn apply_accent(&self) {
-        for (name, _) in ACCENTS {
-            self.window.remove_css_class(&format!("accent-{name}"));
-        }
-        if let Some(class) = accent_class(&self.preferences.borrow().accent) {
-            self.window.add_css_class(&class);
         }
     }
 

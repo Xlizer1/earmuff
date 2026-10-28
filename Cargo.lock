@@ -350,6 +350,7 @@ dependencies = [
  "gtk4",
  "ksni",
  "libadwaita",
+ "pango",
  "serde_json",
  "tempfile",
  "zbus",
