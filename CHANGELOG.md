@@ -4,6 +4,22 @@ Notable changes to Earmuff. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- AppStream metainfo, so software centers show a description, screenshots and brand colors.
+- `earmuff set mic-monitoring` as another name for `set sidetone`.
+
+### Changed
+
+- The icon has a mic boom, so it shows a headset rather than headphones.
+- A low battery shows in the warning color, which stands out whatever the accent.
+- The same words everywhere: "Mute mic" in the tray, "fully charged" in the tray and
+  notifications, and failures that start with "Couldn't".
+- Earmuff is listed under Settings in app menus, once, and found by more search words.
+- Capitals in headings and badges come from the stylesheet, so screen readers read words.
+
 ## [0.1.0] - 2026-10-28
 
 The first release.
@@ -47,4 +63,5 @@ The first release.
 - `waybar`, for a Waybar module.
 - `sniff`, which prints every report any USB device sends, for supporting new headsets.
 
+[Unreleased]: https://github.com/Xlizer1/earmuff/compare/v0.1.0...main
 [0.1.0]: https://github.com/Xlizer1/earmuff/releases/tag/v0.1.0
