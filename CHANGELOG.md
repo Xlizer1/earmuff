@@ -13,8 +13,13 @@ Notable changes to Earmuff. The format follows
 
 ### Changed
 
-- The icon has a mic boom, so it shows a headset rather than headphones.
-- A low battery shows in the warning color, which stands out whatever the accent.
+- A new look: one page of panels instead of tabs, in graphite with a glacier-teal accent
+  and IBM Plex Sans, and nothing that moves when a setting changes. A big mute button,
+  segmented choices, preset chips and an equalizer curve that runs through its faders.
+- A headset switcher in the header replaces the sidebar.
+- A new logomark, the Equalizer E, for the app icon and the tray.
+- One brand color: the accent choice in Preferences is gone.
+- A low battery shows in the warning color.
 - The same words everywhere: "Mute mic" in the tray, "fully charged" in the tray and
   notifications, and failures that start with "Couldn't".
 - Earmuff is listed under Settings in app menus, once, and found by more search words.

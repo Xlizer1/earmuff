@@ -3,7 +3,7 @@
 Battery and settings for your gaming headset on Linux, in place of vendor apps
 like HyperX NGENUITY. Written in Rust with GTK4 and libadwaita.
 
-![Earmuff showing a headset's battery, mic monitoring and ChatMix](docs/screenshots/overview.png)
+![Earmuff's dashboard: battery, microphone, sound, the equalizer and battery history](docs/screenshots/overview.png)
 
 ## Supported headsets
 
@@ -20,30 +20,27 @@ with a few lines from `earmuff sniff`.
 
 ## What it does
 
-Run `earmuff`, or open "Earmuff" from the app menu. It shows what your headset has,
-with a sidebar for every connected headset, a banner with its battery ring, and a tab
-per kind of setting.
+Run `earmuff`, or open "Earmuff" from the app menu. Everything your headset has is on
+one page, a panel per kind of setting, with a switcher in the header when more than one
+headset is plugged in. The panels stay put: nothing jumps around when a setting changes.
 
 **Battery.** Level and charging state, how long it has left, and a graph of the last
 day or week. A notification says when the battery runs low (at a level you pick, and
 again at half of it) and when it's fully charged.
-
-![Battery history and the time left](docs/screenshots/power.png)
 
 **Microphone.** Mute (in sync with the button on the headset), volume, noise filter,
 mute-when-raised and the mute light. A mic test records five seconds with a level
 meter and plays them back.
 
 **Sound.** Mic monitoring (hearing your own voice) and its level, ChatMix, the volume
-limiter, and the headset's equalizer: its presets, or a curve of your own, band by band.
-
-![The equalizer](docs/screenshots/equalizer.png)
+limiter, and the headset's equalizer: its presets, or a curve of your own, dragged
+band by band.
 
 **A software equalizer** for headsets without one of their own, like the Cloud Alpha
 Wireless. It runs on the computer, in PipeWire, for everything played through the
 headset, with ten bands and presets for bass, footsteps, voices and treble.
 
-![The software equalizer on a Cloud Alpha Wireless](docs/screenshots/software-eq.png)
+![A Cloud Alpha Wireless with its mic muted and the software equalizer on](docs/screenshots/cloud-alpha.png)
 
 **And the rest.** Lights, auto power-off, voice prompts, the notification sound and
 the Bluetooth options. The headset's model, USB ID and how Earmuff reaches it.
@@ -51,8 +48,7 @@ the Bluetooth options. The headset's model, USB ID and how Earmuff reaches it.
 Earmuff remembers each headset's settings and puts them back when it reconnects (some
 headsets forget theirs when turned off). It can also make a headset the computer's
 speakers and mic whenever it turns on. Both are in Preferences (Ctrl+,), with the
-accent color (red, cyan, green, purple or orange), the battery alerts and starting
-at login.
+battery alerts and starting at login.
 
 | Shortcut | Does |
 |---|---|
@@ -121,7 +117,7 @@ The package includes the udev rule that lets you open the headset's dongle.
 
 ### From source
 
-You need Rust 1.88 or newer, GTK 4.16 and libadwaita 1.5 or newer, and
+You need Rust 1.88 or newer, GTK 4.16, libadwaita 1.5 and Pango 1.56 or newer, and
 `glib-compile-resources` (part of GLib's development files).
 
 ```
@@ -160,6 +156,8 @@ nothing shows up on your desktop while they run.
 Command bytes for the Cloud Alpha Wireless come from
 [HeadsetControl](https://github.com/Sapd/HeadsetControl) (GPL-3.0) and
 [HyperHeadset](https://github.com/LennardKittner/HyperHeadset) (MIT).
+Earmuff's typeface is [IBM Plex Sans](https://github.com/IBM/plex), under the SIL Open
+Font License 1.1 ([data/fonts/OFL.txt](data/fonts/OFL.txt)).
 
 ## Trademarks
 

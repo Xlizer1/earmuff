@@ -15,7 +15,7 @@ Captures of the vendor's own app changing a setting help most. On Windows,
 
 ## Setting up
 
-You need Rust 1.88 or newer, GTK 4.16, libadwaita 1.5 and `glib-compile-resources`.
+You need Rust 1.88 or newer, GTK 4.16, libadwaita 1.5, Pango 1.56 and `glib-compile-resources`.
 The end-to-end tests also need `gtk4-broadwayd` (part of GTK 4) and `dbus-daemon`,
 and the HeadsetControl tests need `headsetcontrol`. On Arch:
 

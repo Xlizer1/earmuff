@@ -22,9 +22,9 @@ Plain, friendly and direct, like a friend who knows headsets.
   sentences.
 - Say what happens, not how it works: "Runs on this computer", not "PipeWire filter chain".
   Technical names belong in docs and the command line.
-- Sentence case for everything: titles, buttons, menu items. Capitals for headings,
-  badges and the banner come from CSS (`text-transform`), never from the text, so screen
-  readers read words.
+- Sentence case for everything: titles, buttons, menu items. The capitals on panel
+  titles and the status badge come from CSS (`text-transform`), never from the text, so
+  screen readers read words.
 - Failures start with "Couldn't …", then the reason: "Couldn't switch the sound: …".
 - `…` (one character) for something in progress: "Connecting…", "Reading the battery…".
 
@@ -43,43 +43,54 @@ Plain, friendly and direct, like a friend who knows headsets.
 
 ## Color
 
-Dark, deep charcoal surfaces with one glowing accent. Every color is a libadwaita CSS
-variable in `data/style.css`; code that draws (the battery ring, graph, equalizer preview)
-takes its color from CSS, never a literal.
+Graphite surfaces with one glacier-teal accent, used only for what's active: the chosen
+preset, a switch that's on, a value, the curve. No glows and no gradients; depth comes
+from the surface steps and hairlines. Every color is a libadwaita CSS variable in
+`data/style.css`, and code that draws (the battery ring, graph, equalizer curve) takes its
+color from CSS, never a literal.
 
 | Role | Value |
 |---|---|
-| Window / headerbar and sidebar / cards | `#0f1015` / `#0b0c10` / `#181a21` |
-| Text | `#eceef4` |
-| Accent text and lines (red, the default) | `#ff5a5f` |
-| Accent fill (red) | `#e3242b` |
-| Other accents (text / fill) | cyan `#3fd4ec` / `#0098b3`, green `#4fdd7c` / `#1c9a45`, purple `#b18cff` / `#7c3aed`, orange `#ff9d42` / `#df6108` |
-| Low battery | libadwaita's `--warning-color` |
+| Window / header / panels / controls in panels | `#0d1012` / `#0b0e10` / `#14181b` / `#1a1f23` |
+| Hairlines (panel edges, dividers) | white at 6% |
+| Text / dimmed text | `#e6ecee` / the same at 60% |
+| Accent: text, lines, the curve | `#3ddcc4` |
+| Accent fill (switches), with text on it | `#19b3a0`, text `#04201c` |
+| Low battery / muted mic | libadwaita's `--warning-color` / `--error-color` |
 
-- The accent is the user's choice; nothing may depend on it being red. States that must
-  stand out (a low battery) use libadwaita's warning and error colors instead.
-- Accent text is at least 5.7:1 against cards. White on the cyan, green and orange
-  fills is only about 3.5:1, so don't put text on an accent fill.
-- Brand color outside the app (AppStream banners): `#ffc2c4` in light, `#4a0f13` in dark.
+- There's one accent, Earmuff's own, away from the vendors' reds, oranges and blues.
+- States that must stand out use the warning and error colors, never the accent.
+- Accent text is above 10:1 against panels; text on the accent fill is dark, not white.
+- Brand color outside the app (AppStream banners): `#c4f1e9` in light, `#10302b` in dark.
 
 ## Type
 
-The system's UI font, in heavy weights: 800–900 for headings and the banner, with wide
-letter-spacing (0.08–0.16 em) on capitals. Body text stays regular; the dimmed text is
-libadwaita's.
+IBM Plex Sans, bundled with the app (data/fonts, OFL), so it looks the same on every
+desktop. Big numbers at 600 with tabular figures; panel titles at 12 px, 600, in capitals
+with 0.06 em spacing and dimmed; row titles at 500; body text regular.
+
+## Layout
+
+One page of panels in a six-column grid, placed by the view model from what the headset
+has, never from its state. Panels in a row share its height, so their edges line up, and
+a control never appears, disappears or changes size when the user acts on it: inactive
+controls are dimmed, not hidden. Narrow windows get one column.
 
 ## Icon
 
-A headset with a mic boom: red on a dark tile for the app icon, a single-color glyph for
-the symbolic icons (the banner, the Audio tab and panels).
+The Equalizer E: an E built from three level bars, Earmuff's initial and what it does.
+Teal on a graphite tile for the app icon and the tray; a one-color glyph for the
+symbolic icon and the header. The headset glyph stays for "headset" itself (the empty
+pages).
 
 - `data/icons/scalable/apps/io.github.xlizer1.Earmuff.svg`: the app icon
-- `…-symbolic.svg` and `data/icons/scalable/actions/earmuff-headset-symbolic.svg`: the glyph
+- `…/io.github.xlizer1.Earmuff-symbolic.svg`: the mark as a glyph
+- `data/icons/scalable/actions/earmuff-headset-symbolic.svg`: the headset glyph
 - `data/icons/tray/earmuff-64.png`: the tray picture, rendered from the app icon with
   `rsvg-convert -w 64 -h 64`; render it again whenever the icon changes
 - Symbolic icons use filled shapes only (GTK recolors fills), and must read at 16 px.
 
 ## Screenshots
 
-`make screenshots` retakes the README's pictures with the demo headsets on the default
-red accent. Retake them whenever the window changes, and don't edit them by hand.
+`make screenshots` retakes the README's pictures with the demo headsets: each a whole
+dashboard. Retake them whenever the window changes, and don't edit them by hand.

@@ -34,29 +34,21 @@
   <url type="contribute">https://github.com/Xlizer1/earmuff/blob/main/CONTRIBUTING.md</url>
   <screenshots>
     <screenshot type="default">
-      <caption>A headset's battery, mic monitoring and ChatMix</caption>
+      <caption>Everything a headset has, on one page</caption>
       <image>https://raw.githubusercontent.com/Xlizer1/earmuff/main/docs/screenshots/overview.png</image>
     </screenshot>
     <screenshot>
-      <caption>The headset's equalizer</caption>
-      <image>https://raw.githubusercontent.com/Xlizer1/earmuff/main/docs/screenshots/equalizer.png</image>
-    </screenshot>
-    <screenshot>
-      <caption>Battery history and the time left</caption>
-      <image>https://raw.githubusercontent.com/Xlizer1/earmuff/main/docs/screenshots/power.png</image>
-    </screenshot>
-    <screenshot>
-      <caption>The software equalizer, for headsets without one</caption>
-      <image>https://raw.githubusercontent.com/Xlizer1/earmuff/main/docs/screenshots/software-eq.png</image>
+      <caption>A muted mic, and the software equalizer for a headset without one</caption>
+      <image>https://raw.githubusercontent.com/Xlizer1/earmuff/main/docs/screenshots/cloud-alpha.png</image>
     </screenshot>
   </screenshots>
   <branding>
-    <color type="primary" scheme_preference="light">#ffc2c4</color>
-    <color type="primary" scheme_preference="dark">#4a0f13</color>
+    <color type="primary" scheme_preference="light">#c4f1e9</color>
+    <color type="primary" scheme_preference="dark">#10302b</color>
   </branding>
   <content_rating type="oars-1.1"/>
   <requires>
-    <display_length compare="ge">360</display_length>
+    <display_length compare="ge">420</display_length>
   </requires>
   <supports>
     <control>pointing</control>
