@@ -44,6 +44,8 @@ impl EqualizerEditor {
             let slider = gtk::Scale::with_range(gtk::Orientation::Vertical, min, max, view.step.db().max(0.1));
             slider.set_widget_name(&format!("eq-band-{band}"));
             slider.set_inverted(true);
+            // no bar from the bottom: a cut would look like a small boost
+            slider.set_has_origin(false);
             slider.set_draw_value(false);
             slider.set_round_digits(1);
             slider.set_height_request(140);
